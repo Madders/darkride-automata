@@ -91,6 +91,18 @@ has one, opens with the loudness of its own sound. Bots never speak words: they 
 Other sounds: an alert beep when a visitor arrives, a trill greeting another bot or after a roll, "oooh" peering over
 a drop, a sad note when ignored, and the rocket's whoosh. All are synthesised (`tools/make_sounds.py`).
 
+## Personality and memory
+
+Each bot has five traits (docs/designing-bots.md): energy, curiosity, shyness, chattiness and sociability, from the
+roster or from its id. They tilt its choices: how long it idles and how briskly it walks, whether it goes to look at
+things or just wanders, whether it walks up to visitors or keeps away (a shy bot backs off from a stranger who comes
+within a metre or two), how much it chirps, how often it seeks out other bots. It remembers visitors (by display
+name), how often it has met them and whether they've praised or scolded it, and the bots it has met; old friends get
+a warmer welcome and a shy bot isn't shy with them, someone who scolded it is avoided, and bots that meet often become
+friends and sometimes walk about together (one follows the other for a minute). With the bots' service running
+(tools/hearing.py), each bot keeps its memories there (`GET`/`POST /memory/<id>`, saved at most once a minute and
+when it stops) and gets them back when it starts.
+
 ## Voice commands
 
 With a speech service running (the roster's `hearing`, see below) bots also understand a few spoken words. Each bot
@@ -117,6 +129,23 @@ of the speaker, does it:
 Not always: each bot has an `obedience` (0 to 1, default 0.7) and otherwise refuses with a sad note, a questioning
 "hm?" or a kick. Bouncers ignore commands. Saying a name ("Pip, sit") picks that bot from anywhere it can hear you;
 without one, every bot near you may answer.
+
+## Guides
+
+A bot with `"role": "guide"` (docs/designing-bots.md) runs from its own loader like a bouncer and gives tours: it
+waits at its post, walks over to offer a tour to anyone new who lingers nearby, then leads them from stop to stop,
+pausing to call them if they lag, giving up if they wander off, and saying its piece at each stop (its lines are
+spoken sounds, as a bouncer's). Spoken "tour" asks for one; "no", "stop" and "go away" end it.
+
+## Mouse droids
+
+A bot built as a mouse droid (`"build": "mouse"`) runs the same brain with a few changes: it moves at 2.6 times the
+pace (its hidden legs' walk cycle sped up with it, so it jiggles), turns four times as fast, chatters instead of
+chirping, prefers walls to edges, never sits or rolls, and is always shy.
+
+An astromech (`"build": "astromech"`) holds its neck still and turns only its dome (head_yaw) to look about, glides on
+the idle cycle instead of stepping, turns twice as fast, whistles, and spins its dome where another bot would sit or
+roll. A power droid (`"build": "power"`) plods at about half pace on its walk cycle, honks, and never rolls.
 
 ## Rockets
 

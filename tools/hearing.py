@@ -7,13 +7,19 @@ command words and their names (a fixed vocabulary is quick and hard to fool), an
   POST /hear   body: raw PCM, 16-bit little-endian mono at 24 kHz   ->   {"text": "pip sit", "words": ["pip", "sit"]}
   GET  /       -> {"ok": true, "words": [...the vocabulary...]}
 
+It also keeps the bots' memories (who they've met, who praised or scolded them, which bots are friends), so they
+last across restarts: GET /memory/<bot id> gives one back (404 if none), POST /memory/<bot id> stores it. They live
+in one JSON file, bots-memory.json beside the roster (--memory to put it elsewhere).
+
 Run it on the machine the bots run on (they reach it at the roster's "hearing" URL, normally http://127.0.0.1:40195/hear).
 Needs: vosk, numpy, and a Vosk model (the small English one: https://alphacephei.com/vosk/models, unzipped into
 .models/). Usage: python hearing.py [--roster bots.json] [--model .models/vosk-model-small-en-us-0.15] [--port 40195] [--dump last.wav]
+[--memory bots-memory.json]
 """
 import http.server
 import json
 import pathlib
+import re
 import sys
 import threading
 import wave
@@ -23,7 +29,8 @@ import vosk
 
 KIT = pathlib.Path(__file__).resolve().parents[1]
 COMMANDS = ["sit", "sit down", "jump", "roll", "come", "come here", "here", "follow", "follow me", "stay", "stop",
-            "wait", "go away", "away", "dance", "spin", "hello", "hi", "good", "bad", "no"]
+            "wait", "go away", "away", "dance", "spin", "hello", "hi", "good", "bad", "no",
+            "tour", "yes", "okay", "sure"]
 
 
 def arg(name, default=None):
@@ -55,6 +62,9 @@ def main():
     names = [b["name"] for b in json.loads(roster_path.read_text(encoding="utf-8"))["bots"]]
     model = pathlib.Path(arg("--model", KIT / ".models" / "vosk-model-small-en-us-0.15"))
     ears = Ears(model, names)
+    memory_path = pathlib.Path(arg("--memory", roster_path.with_name("bots-memory.json")))
+    memories = json.loads(memory_path.read_text(encoding="utf-8")) if memory_path.exists() else {}
+    memory_lock = threading.Lock()
     dump = arg("--dump")
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -66,11 +76,41 @@ def main():
             self.end_headers()
             self.wfile.write(body)
 
+        def memory_id(self):
+            m = re.fullmatch(r"/memory/([a-z0-9_-]{1,40})", self.path)
+            return m and m.group(1)
+
         def do_GET(self):
+            bot = self.memory_id()
+            if bot:
+                with memory_lock:
+                    kept = memories.get(bot)
+                if kept is None:
+                    self.send_error(404)
+                else:
+                    self.reply(kept)
+                return
             self.reply({"ok": True, "words": ears.words})
 
         def do_POST(self):
-            pcm = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            size = int(self.headers.get("Content-Length", 0))
+            bot = self.memory_id()
+            if bot:
+                if size > 1_000_000:
+                    self.send_error(413)
+                    return
+                try:
+                    kept = json.loads(self.rfile.read(size))
+                except ValueError:
+                    self.send_error(400)
+                    return
+                with memory_lock:
+                    memories[bot] = kept
+                    memory_path.write_text(json.dumps(memories, indent=1), encoding="utf-8")
+                print("kept %s's memory (%d visitors)" % (bot, len(kept.get("visitors", {}))), flush=True)
+                self.reply({"ok": True})
+                return
+            pcm = self.rfile.read(size)
             with ears.lock:
                 text = ears.hear(pcm)
             print("heard %.1f s: %r" % (len(pcm) / 48000, text), flush=True)

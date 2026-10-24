@@ -4,7 +4,8 @@ Each model is built from simple rounded parts: a torso shell, servo hubs with gl
 shins and flat feet, a neck column and a head, with a choice per bot of head (loaf, dome or wedge), eyes (lens, visor
 slit or twin lenses), antennas (0 to 2), back fins, a crest, a chest light, rocket pods, colours, weathering
 (weathering.py: Star Wars droid style, from factory-fresh to beaten up, by the bot's wear), and a jaw that opens
-while the bot makes a sound. See docs/designing-bots.md.
+while the bot makes a sound. Other bodies on the same skeleton: a bouncer (an armoured sentry), a mouse droid, a
+power droid and an astromech (style "build"). See docs/designing-bots.md.
 
 The parts are designed with the robot standing in its rest pose (the walk policy's default pose: from the skeleton
 and bot/duck-cycles.json) and carried onto each bone's bind pose, so every bot shares the skeleton, and the recorded
@@ -12,8 +13,8 @@ walks and moves fit them all. The jaw is a bone added to the skeleton here (a ch
 of the head); every bot has it, and only those with the jaw style have a separate lower jaw on it. Each bot's .fst
 lists the joints in the order a viewer builds them (docs/skeleton.md).
 
-Writes, into the output folder: duck-<id>.glb and duck-<id>.fst for each bot, their textures (bot-<id>-shell.png,
-bot-<id>-dark.png), for a bot with a role its own persistent script (bot-<id>.js), fx-spark.png and a copy of the
+Writes, into the output folder: duck-<id>.glb and duck-<id>.fst for each bot, their weathered textures and
+normal maps (bot-<id>-shell.png, bot-<id>-shell-n.png, and the same for dark, metal and trim, those its body uses), for a bot with a role its own persistent script (bot-<id>.js), fx-spark.png and a copy of the
 roster as bots.json.
 
 Usage: python build_bots.py [--roster examples/bots.json] [--out dist/bot] [bot id ...]
@@ -35,7 +36,7 @@ KIT = HERE.parent
 FLOOR = -0.48                   # the floor below the hips in the rest pose (the trunk's height)
 JAW_HINGE = [0, 0.445, 0.09]    # where the jaw hinges, under the back of the head, in the rest pose
 TILE = 0.5                      # metres of bot one texture covers (box-projected)
-TEXTURED = ("shell", "dark")    # the materials with weathering (weathering.py)
+TEXTURED = ("shell", "dark", "metal", "trim")    # the materials with weathering and relief (weathering.py)
 
 
 # ── the skeleton ───────────────────────────────────────────────────────────
@@ -192,6 +193,12 @@ def design(sk, style):
     """[(mesh, material, bone, smooth)] for a bot of this style, in the rest pose."""
     if style.get("build") == "bouncer":
         return design_bouncer(sk, style)
+    if style.get("build") == "mouse":
+        return design_mouse(sk, style)
+    if style.get("build") == "power":
+        return design_power(sk, style)
+    if style.get("build") == "astromech":
+        return design_astromech(sk, style)
     parts = []
 
     def add(mesh, material, bone, smooth=True):
@@ -205,6 +212,17 @@ def design(sk, style):
         add(rounded_box([-0.06, -0.005, -0.142], [0.06, 0.01, -0.12], 0.006), "glow", "Hips")
     for x in ((-0.123, -0.112), (0.112, 0.123)):                    # side vents
         add(box([x[0], 0.0, -0.05], [x[1], 0.09, 0.08]), "dark", "Hips", False)
+    if style.get("pennant"):
+        # a tour guide's pennant: a pole up from its back, a little flag in its glowing colour streaming behind
+        foot, top = np.array([0.075, 0.1, 0.16]), np.array([0.085, 1.02, 0.2])
+        add(capsule(foot, top, 0.006), "dark", "Hips")
+        add(ellipsoid(top, [0.014, 0.014, 0.014], 1), "glow", "Hips")
+        y0, y1 = top[1] - 0.17, top[1] - 0.02
+        flag = trimesh.Trimesh([[top[0] - 0.004, y0, top[2]], [top[0] - 0.004, y1, top[2]], [top[0] - 0.004, (y0 + y1) / 2, top[2] + 0.24],
+                                [top[0] + 0.004, y0, top[2]], [top[0] + 0.004, y1, top[2]], [top[0] + 0.004, (y0 + y1) / 2, top[2] + 0.24]],
+                               [[0, 1, 2], [3, 5, 4], [0, 3, 4], [0, 4, 1], [1, 4, 5], [1, 5, 2], [2, 5, 3], [2, 3, 0]])
+        flag.fix_normals()
+        add(flag, "glow", "Hips", False)
     if style.get("fins"):
         for x in (-0.045, 0.045):
             add(rounded_box([x - 0.008, 0.02, 0.15], [x + 0.008, 0.2, 0.23], 0.007), "dark", "Hips")
@@ -416,6 +434,179 @@ def design_bouncer(sk, style):
     return parts
 
 
+MOUSE_TOP = FLOOR + 0.25        # the mouse droid's height
+
+
+def design_mouse(sk, style):
+    """A mouse droid (an MSE-6 sort): a low boxy body skimming the floor, with the legs hidden in its skirt (they
+    still walk, under there, which makes it jiggle along). Everything rides on Hips: no head to turn. A wedge nose
+    with a bumper and a sensor eye, wheel housings, hinged top panels, a grille, stub antennas and a tail light."""
+    parts = []
+
+    def add(mesh, material, smooth=True):
+        parts.append((mesh, material, "Hips", smooth))
+
+    lo, hi = np.array([-0.17, FLOOR + 0.035, -0.29]), np.array([0.17, MOUSE_TOP, 0.25])
+    body = rounded_box(lo, hi, 0.03)
+    v = body.vertices.copy()
+    nose = np.clip((v[:, 2] - lo[2]) / 0.16, 0, 1)                      # slope the top down to the nose
+    v[:, 1] = np.where(v[:, 1] > FLOOR + 0.12, v[:, 1] - (1 - nose) * 0.08, v[:, 1])
+    body.vertices = v
+    add(body, "shell")
+    add(rounded_box([-0.175, FLOOR + 0.015, -0.27], [0.175, FLOOR + 0.07, 0.235], 0.02), "dark")      # skirt
+    add(rounded_box([-0.15, FLOOR + 0.03, -0.31], [0.15, FLOOR + 0.08, -0.27], 0.015), "dark")        # bumper
+    add(disc([0, FLOOR + 0.13, -0.285], [0, 0.35, -1], 0.03, 0.03), "dark", False)                   # the eye
+    add(disc([0, FLOOR + 0.131, -0.297], [0, 0.35, -1], 0.018, 0.012), "lens", False)
+    add(ring([0, FLOOR + 0.132, -0.302], [0, 0.35, -1], 0.008, 0.013, 0.008), "glow", False)
+    for x in (-0.18, 0.18):                                              # wheel housings, hubs showing
+        for z in (-0.17, 0.14):
+            add(rounded_box([x - 0.012, FLOOR + 0.02, z - 0.06], [x + 0.012, FLOOR + 0.1, z + 0.06], 0.01), "dark")
+            add(disc([x * 1.08, FLOOR + 0.055, z], [1, 0, 0], 0.03, 0.012), "shell", False)
+    for z0, z1 in ((-0.12, 0.04), (0.06, 0.22)):                        # hinged top panels with handles
+        add(rounded_box([-0.14, MOUSE_TOP - 0.004, z0], [0.14, MOUSE_TOP + 0.014, z1], 0.006), "shell")
+        add(capsule([-0.04, MOUSE_TOP + 0.022, (z0 + z1) / 2], [0.04, MOUSE_TOP + 0.022, (z0 + z1) / 2], 0.006), "dark")
+    for x in np.linspace(-0.12, 0.12, 9):                               # a cooling grille on the back
+        add(box([x - 0.006, FLOOR + 0.09, 0.25], [x + 0.006, MOUSE_TOP - 0.03, 0.262]), "dark", False)
+    add(box([-0.06, MOUSE_TOP - 0.025, 0.252], [0.06, MOUSE_TOP - 0.012, 0.264]), "glow", False)     # tail light
+    for x in (-0.1, 0.1):                                               # stub antennas
+        base = np.array([x, MOUSE_TOP + 0.01, 0.18])
+        add(capsule(base, base + [0, 0.07, 0.015], 0.005), "dark")
+        add(ellipsoid(base + [0, 0.075, 0.016], [0.009, 0.009, 0.009], 1), "glow")
+    if style.get("antennas", 0) >= 1:                                   # a whip aerial
+        add(capsule([0.12, MOUSE_TOP, 0.2], [0.13, MOUSE_TOP + 0.28, 0.24], 0.003), "dark")
+    rivets_on = [[x, FLOOR + 0.2, z] for x in (-0.172, 0.172) for z in (-0.05, 0.05, 0.15)]
+    for p in rivets_on:
+        add(ellipsoid(p, [0.007, 0.007, 0.007], 1), "dark")
+    return parts
+
+
+def cylinder(centre, axis, radius, height, sections=40):
+    return disc(centre, axis, radius, height, sections)
+
+
+def design_power(sk, style):
+    """A power droid (the EG-6 "gonk" sort, like DN-LD): a tall box of a battery on two stubby legs. No lights to
+    speak of: a small status lamp, vents, a control panel, side drums, a top hatch with handles, a power coupling. The
+    box rides on Hips (it waddles as it walks); the legs below it are the duck's, made short and thick."""
+    parts = []
+
+    def add(mesh, material, bone="Hips", smooth=True):
+        parts.append((mesh, material, bone, smooth))
+
+    lo, hi = np.array([-0.2, -0.21, -0.18]), np.array([0.2, 0.5, 0.18])
+    add(rounded_box(lo, hi, 0.05), "shell")
+    add(rounded_box([-0.18, hi[1] - 0.02, -0.15], [0.18, hi[1] + 0.05, 0.15], 0.04), "shell")       # the rounded top
+    add(rounded_box([-0.12, hi[1] + 0.04, -0.08], [0.12, hi[1] + 0.065, 0.08], 0.01), "dark")        # top hatch
+    for z in (-0.04, 0.04):
+        add(capsule([-0.05, hi[1] + 0.08, z], [0.05, hi[1] + 0.08, z], 0.008), "dark")              # its handles
+    add(rounded_box([-0.205, -0.19, -0.16], [0.205, -0.14, 0.16], 0.015), "dark")                   # a skirt band
+    add(rounded_box([-0.205, 0.38, -0.16], [0.205, 0.41, 0.16], 0.01), "dark")                      # a band near the top
+    # the front: a control panel with knobs and a little status lamp, a grille below
+    add(rounded_box([-0.12, 0.12, lo[2] - 0.015], [0.12, 0.3, lo[2] + 0.01], 0.012), "dark")
+    for x in (-0.07, 0.0, 0.07):
+        add(disc([x, 0.24, lo[2] - 0.02], [0, 0, 1], 0.018, 0.02), "metal", smooth=False)
+    add(disc([0.08, 0.16, lo[2] - 0.02], [0, 0, 1], 0.012, 0.015), "glow", smooth=False)
+    for y in np.linspace(-0.08, 0.06, 6):
+        add(box([-0.11, y - 0.008, lo[2] - 0.012], [0.11, y + 0.008, lo[2] + 0.005]), "dark", smooth=False)
+    # the sides: power drums and a coupling socket
+    for sx in (-1, 1):
+        add(cylinder([sx * 0.205, 0.17, 0.0], [1, 0, 0], 0.09, 0.03), "dark", smooth=False)
+        add(cylinder([sx * 0.22, 0.17, 0.0], [1, 0, 0], 0.06, 0.02), "metal", smooth=False)
+        add(cylinder([sx * 0.232, 0.17, 0.0], [1, 0, 0], 0.025, 0.02), "dark", smooth=False)
+    add(cylinder([0.0, 0.3, hi[2] + 0.01], [0, 0, 1], 0.05, 0.03), "dark", smooth=False)         # coupling, back
+    add(rounded_box([-0.14, -0.1, hi[2] - 0.005], [0.14, 0.2, hi[2] + 0.02], 0.01), "dark")        # back plate
+    rivets(add, "Hips", [[x, y, lo[2] - 0.004] for x in (-0.17, 0.17) for y in (-0.12, 0.45)])
+    # legs: short thick shins and big flat feet below the box; the thighs are inside it
+    for side in ("left", "right"):
+        kn, an = sk.pos(side + "_knee"), sk.pos(side + "_ankle")
+        ax = sk.axis(side + "_knee")
+        add(cylinder(kn, ax, 0.05, 0.06), "dark", side + "_knee", False)
+        add(tapered(kn, an, 0.045, 0.04), "shell", side + "_knee")
+        add(cylinder(an, sk.axis(side + "_ankle"), 0.045, 0.06), "dark", side + "_ankle", False)
+        add(rounded_box([an[0] - 0.065, FLOOR, -0.16], [an[0] + 0.065, FLOOR + 0.06, 0.1], 0.025), "shell", side + "_ankle")
+        add(rounded_box([an[0] - 0.06, FLOOR - 0.003, -0.15], [an[0] + 0.06, FLOOR + 0.015, 0.09], 0.006), "dark", side + "_ankle")
+    return parts
+
+
+ASTRO_AXIS = [0, -0.036]        # the astromech's body and dome share the head's swivel axis (x, z)
+
+
+def design_astromech(sk, style):
+    """An astromech (the R-series sort): a barrel of a body on two side legs with a third in the middle, a domed head
+    that swivels (on head_yaw) to look about. No neon: a radar eye, a holo-projector, two small logic panels, and
+    its second paint on the dome and body panels. The body and legs ride on Hips, the dome on head_yaw; the duck's
+    legs are hidden inside (the brain glides it along and keeps its neck still)."""
+    parts = []
+
+    def add(mesh, material, bone="Hips", smooth=True):
+        parts.append((mesh, material, bone, smooth))
+
+    cx, cz = ASTRO_AXIS
+    top = sk.pos("head_yaw")[1] - 0.012                                  # the body's top, just under the dome
+    r, y0 = 0.2, FLOOR + 0.2
+    add(cylinder([cx, (top + y0) / 2, cz], [0, 1, 0], r, top - y0, 48), "shell")
+    add(cylinder([cx, y0 - 0.03, cz], [0, 1, 0], r * 0.82, 0.06), "dark", smooth=False)            # the lower skirt
+    add(cylinder([cx, top - 0.005, cz], [0, 1, 0], r + 0.004, 0.012), "metal", smooth=False)       # the dome ring
+    # panels on the body, in its second paint: two tall ones in front, a band, side panels
+    fz = cz - r - 0.004
+    for x0, x1 in ((-0.13, -0.05), (0.05, 0.13)):
+        add(box([x0, y0 + 0.12, fz - 0.006], [x1, top - 0.08, fz + 0.03]), "trim", smooth=False)
+    add(box([-0.04, top - 0.12, fz - 0.006], [0.04, top - 0.07, fz + 0.03]), "dark", smooth=False)  # a vent
+    for y in (y0 + 0.05, y0 + 0.08):                                     # coin-slot vents low down
+        add(box([-0.035, y - 0.006, fz - 0.008], [0.035, y + 0.006, fz + 0.03]), "dark", smooth=False)
+    add(box([-0.17, top - 0.05, cz - 0.1], [0.17, top - 0.035, cz + 0.1]), "trim", smooth=False)
+    for sx in (-1, 1):
+        add(box([sx * (r - 0.02) - 0.02, y0 + 0.15, cz - 0.06], [sx * (r - 0.02) + 0.02, top - 0.1, cz + 0.06]), "trim", smooth=False)
+    # the side legs: a shoulder hub, a broad strut down to a big foot, angled back a touch; the third leg in the middle
+    sy = top - 0.13
+    for sx in (-1, 1):
+        x = sx * (r + 0.045)
+        add(cylinder([sx * (r + 0.01), sy, cz], [1, 0, 0], 0.07, 0.05), "metal", smooth=False)
+        add(cylinder([sx * (r + 0.035), sy, cz], [1, 0, 0], 0.045, 0.02), "trim", smooth=False)
+        strut = rounded_box([x - 0.03, FLOOR + 0.1, cz - 0.045], [x + 0.03, sy + 0.04, cz + 0.045], 0.02)
+        add(strut, "shell")
+        add(box([x - 0.032, FLOOR + 0.2, cz - 0.02], [x + 0.032, sy - 0.05, cz + 0.02]), "trim", smooth=False)
+        # the foot rides on the duck's ankle (right by it), which the brain keeps level while the body and struts
+        # lean as it drives: so the leg pivots at the ankle and the wheels stay flat on the floor
+        ankle = ("left" if sx < 0 else "right") + "_ankle"
+        add(rounded_box([x - 0.05, FLOOR, cz - 0.13], [x + 0.05, FLOOR + 0.12, cz + 0.09], 0.025), "shell", ankle)
+        add(rounded_box([x - 0.045, FLOOR - 0.003, cz - 0.12], [x + 0.045, FLOOR + 0.02, cz + 0.08], 0.008), "dark", ankle)
+        add(cylinder([x, FLOOR + 0.1, cz - 0.02], [1, 0, 0], 0.035, 0.11), "metal", ankle, False)   # the ankle hinge
+        if style.get("rockets"):                                         # booster pods on the outside of each leg
+            c = np.array([x + sx * 0.045, FLOOR + 0.32, cz + 0.02])
+            add(capsule(c + [0, 0.1, 0], c, 0.026), "metal")
+            add(disc(c + [0, -0.02, 0], [0, 1, 0], 0.03, 0.03), "dark", smooth=False)
+    add(rounded_box([cx - 0.035, FLOOR + 0.04, cz - 0.05], [cx + 0.035, y0, cz + 0.04], 0.015), "metal")      # middle leg
+    add(rounded_box([cx - 0.05, FLOOR, cz - 0.08], [cx + 0.05, FLOOR + 0.05, cz + 0.06], 0.015), "dark")
+    # the dome: silver, panels in its second paint, a radar eye, a holo-projector, two little logic panels
+    hy = sk.pos("head_yaw")
+    centre = np.array([cx, hy[1], cz])
+    ball = trimesh.creation.icosphere(subdivisions=4, radius=r).vertices
+    rim = [[r * np.cos(a), 0, r * np.sin(a)] for a in np.linspace(0, 2 * np.pi, 64, endpoint=False)]
+    dome = trimesh.convex.convex_hull(np.vstack([ball[ball[:, 1] > 0], rim]))   # the top half of a ball
+    dome.apply_scale([1, 0.92, 1])
+    dome.apply_translation(centre)
+    add(dome, "metal", "head_yaw")
+    for k, a in enumerate(np.linspace(0, 2 * np.pi, 8, endpoint=False)):  # a ring of panels round its lower half
+        if k == 0:
+            continue                                                     # (the eye goes there)
+        d = np.array([np.sin(a), 0, -np.cos(a)])
+        p = centre + d * (r * 0.97) + [0, 0.05, 0]
+        panel = box([-0.035, -0.035, -0.006], [0.035, 0.035, 0.006])
+        panel.apply_transform(trimesh.geometry.align_vectors([0, 0, -1], d))
+        panel.apply_translation(p)
+        add(panel, "trim", "head_yaw", False)
+    add(cylinder(centre + [0, 0.16, 0], [0, 1, 0], 0.07, 0.03), "trim", "head_yaw", False)         # the top panel
+    eye = centre + np.array([0, 0.09, -r * 0.88])
+    add(cylinder(eye, [0, 0.4, -1], 0.04, 0.03), "dark", "head_yaw", False)
+    add(cylinder(eye + [0, 0.005, -0.012], [0, 0.4, -1], 0.025, 0.02), "lens", "head_yaw", False)
+    add(cylinder(centre + [0.1, 0.13, -0.12], [0.5, 0.6, -1], 0.022, 0.035), "metal", "head_yaw", False)   # holo-projector
+    for x, w in ((-0.09, 0.05), (0.05, 0.035)):                         # logic panels, a dim glow
+        p = centre + np.array([x, 0.035, -r * 0.985])
+        add(box(p + [-w / 2, -0.018, -0.005], p + [w / 2, 0.018, 0.004]), "glow", "head_yaw", False)
+    return parts
+
+
 def materials(bot):
     """The bot's materials; shell and dark take their weathered textures (their image files, by name, in write())."""
     accent = bot["accent"]
@@ -428,6 +619,10 @@ def materials(bot):
         "glow": {"pbrMetallicRoughness": {"baseColorFactor": list(accent) + [1], "metallicFactor": 0,
                                           "roughnessFactor": 0.3},
                  "emissiveFactor": [c * glow for c in accent]},
+        "metal": {"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.9,
+                                           "roughnessFactor": 0.3 + 0.35 * wear}},
+        "trim": {"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, 1], "metallicFactor": 0.2,
+                                          "roughnessFactor": 0.45 + 0.3 * wear}},
         "lens": {"pbrMetallicRoughness": {"baseColorFactor": [0.02, 0.02, 0.03, 1], "metallicFactor": 0.2,
                                           "roughnessFactor": 0.05},
                  "emissiveFactor": [c * glow * 0.15 for c in accent]},
@@ -474,6 +669,28 @@ def box_uv(mesh, offset):
     return np.c_[u, w] / TILE + offset
 
 
+def tangents(pos, nrm, uv, faces):
+    """Per-vertex tangents (xyz along u, w the handedness) from each triangle's positions and UVs, for normal maps."""
+    t = np.zeros_like(pos, dtype=np.float64)
+    b = np.zeros_like(pos, dtype=np.float64)
+    p0, p1, p2 = pos[faces[:, 0]], pos[faces[:, 1]], pos[faces[:, 2]]
+    w0, w1, w2 = uv[faces[:, 0]], uv[faces[:, 1]], uv[faces[:, 2]]
+    e1, e2, d1, d2 = p1 - p0, p2 - p0, w1 - w0, w2 - w0
+    r = d1[:, 0] * d2[:, 1] - d2[:, 0] * d1[:, 1]
+    r = np.where(np.abs(r) < 1e-12, 1e-12, r)
+    sdir = (e1 * d2[:, 1:2] - e2 * d1[:, 1:2]) / r[:, None]
+    tdir = (e2 * d1[:, 0:1] - e1 * d2[:, 0:1]) / r[:, None]
+    for k in range(3):
+        np.add.at(t, faces[:, k], sdir)
+        np.add.at(b, faces[:, k], tdir)
+    t = t - nrm * np.sum(nrm * t, axis=1, keepdims=True)              # Gram-Schmidt against the normal
+    length = np.linalg.norm(t, axis=1, keepdims=True)
+    fallback = np.cross(nrm, [0, 1, 0]) + np.cross(nrm, [1, 0, 0]) * 0.01
+    t = np.where(length > 1e-9, t / np.maximum(length, 1e-9), fallback / np.linalg.norm(fallback, axis=1, keepdims=True))
+    w = np.where(np.sum(np.cross(nrm, t) * b, axis=1) < 0, -1.0, 1.0)
+    return np.hstack([t, w[:, None]]).astype(np.float32)
+
+
 def write(path, sk, parts, mats, textures):
     nodes = skeleton_nodes(sk)
     jaw_node = len(nodes) - 1
@@ -503,11 +720,15 @@ def write(path, sk, parts, mats, textures):
     skin["inverseBindMatrices"] = put(ibm, 5126, "MAT4")
     out["skins"].append(skin)
 
-    for name, uri in textures.items():                                  # the weathering, as files beside the model
-        out.setdefault("images", []).append({"uri": uri})
+    for name, (uri, normal_uri) in textures.items():                    # the weathering, as files beside the model
         out.setdefault("samplers", [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}])
-        out.setdefault("textures", []).append({"source": len(out["images"]) - 1, "sampler": 0})
-        mats[name]["pbrMetallicRoughness"]["baseColorTexture"] = {"index": len(out["textures"]) - 1}
+        for key, u in (("baseColorTexture", uri), ("normalTexture", normal_uri)):
+            out.setdefault("images", []).append({"uri": u})
+            out.setdefault("textures", []).append({"source": len(out["images"]) - 1, "sampler": 0})
+            if key == "normalTexture":
+                mats[name]["normalTexture"] = {"index": len(out["textures"]) - 1, "scale": 1.0}
+            else:
+                mats[name]["pbrMetallicRoughness"][key] = {"index": len(out["textures"]) - 1}
 
     prims, tris = [], 0
     rng = np.random.default_rng(len(parts))
@@ -541,7 +762,9 @@ def write(path, sk, parts, mats, textures):
                       "JOINTS_0": put(joints, 5121, "VEC4", 34962),
                       "WEIGHTS_0": put(weights, 5126, "VEC4", 34962)}
         if uvs:
-            attributes["TEXCOORD_0"] = put(np.vstack(uvs).astype(np.float32), 5126, "VEC2", 34962)
+            uv = np.vstack(uvs).astype(np.float32)
+            attributes["TEXCOORD_0"] = put(uv, 5126, "VEC2", 34962)
+            attributes["TANGENT"] = put(tangents(pos, np.vstack(nrm), uv, faces), 5126, "VEC4", 34962)
         prims.append({"attributes": attributes, "indices": put(faces.ravel(), 5125, "SCALAR", 34963),
                       "material": len(out["materials"]) - 1})
     out["meshes"].append({"name": "bot", "primitives": prims})
@@ -586,11 +809,23 @@ def main():
         seed = sum(ord(c) * 31 ** k for k, c in enumerate(bot["id"])) % 100000
         bot = dict(bot)
         bot.setdefault("unit", "%s-%02d" % (roster.get("unit_prefix", "DR"), seed % 97))
-        textures = {"shell": "bot-%s-shell.png" % bot["id"], "dark": "bot-%s-dark.png" % bot["id"]}
-        (out / textures["shell"]).write_bytes(weathering.shell_texture(bot, seed))
-        (out / textures["dark"]).write_bytes(weathering.dark_texture(bot, seed))
         style = dict(bot.get("style", {}), rockets=bot.get("rockets", False))
-        tris = write(out / ("duck-%s.glb" % bot["id"]), sk, design(sk, style), materials(bot), textures)
+        parts = design(sk, style)
+        used = {material for _, material, _, _ in parts}
+        trim = bot.get("paint2", list(np.array(bot["accent"]) * 0.55 + np.array(bot["shell"]) * 0.15))
+        paints = {"shell": lambda: weathering.shell_texture(bot, seed),
+                  "dark": lambda: weathering.dark_texture(bot, seed),
+                  "metal": lambda: weathering.shell_texture(bot, seed + 7, [0.66, 0.67, 0.7], False, False),
+                  "trim": lambda: weathering.shell_texture(bot, seed + 13, trim, False, False)}
+        textures = {}
+        for name in TEXTURED:
+            if name not in used:
+                continue
+            textures[name] = ("bot-%s-%s.png" % (bot["id"], name), "bot-%s-%s-n.png" % (bot["id"], name))
+            colour, normal = paints[name]()
+            (out / textures[name][0]).write_bytes(colour)
+            (out / textures[name][1]).write_bytes(normal)
+        tris = write(out / ("duck-%s.glb" % bot["id"]), sk, parts, materials(bot), textures)
         write_fst(out, bot, joints)
         if bot.get("role"):
             # a bot with a role (a bouncer) runs from its own persistent script, which names it

@@ -10,6 +10,8 @@ envelopes, in a few moods:
 - alert: two quick beeps, for something new;
 - rocket: the rocket feet's whoosh, for a hop;
 - servo, clank, countdown: a big bot's hydraulics, heavy feet and countdown beeps.
+- mouse_1..3, mouse_squeal, whirr: a mouse droid's rapid chatter, its squeal when startled, its motor.
+- astro_1..5, astro_scream: an astromech's whistles and warbles, and its scream; gonk_1..2: a power droid's honk.
 Written as 16-bit mono WAV at 24 kHz to bot/sounds/. Usage: python make_sounds.py
 """
 import math
@@ -140,6 +142,27 @@ def main():
     save("rocket", rocket(rng))
     save("servo", servo(rng))
     save("clank", clank(rng))
+    for k in range(1, 4):                       # a mouse droid: quick high bleeps, a startled squeal, its motor
+        notes = [tone(lambda t, f=rng.uniform(1500, 2600): f + 0 * t, rng.uniform(0.025, 0.05), brightness=0.9)
+                 for _ in range(int(rng.integers(7, 14)))]
+        save("mouse_%d" % k, envelope(join(*notes, gap=0.012), attack=0.003, release=0.02))
+    save("mouse_squeal", envelope(join(tone(glide(900, 2700, 0.5), 0.18, 0.04, 45, brightness=0.95),
+                                       tone(glide(2700, 2200), 0.22, 0.08, 60, brightness=0.95), gap=0.0), release=0.05))
+    t = np.arange(int(0.7 * RATE)) / RATE
+    whine = np.sin(2 * np.pi * (380 + 90 * np.sin(2 * np.pi * 3 * t)) * t) * 0.4 + 0.15 * rng.standard_normal(len(t))
+    save("whirr", envelope(whine * 0.5, attack=0.05, release=0.15))
+    for k in range(1, 6):                       # an astromech: whistled phrases, sweeps and warbles
+        bits = []
+        for _ in range(int(rng.integers(3, 7))):
+            a, b = rng.uniform(700, 2400), rng.uniform(700, 2600)
+            bits.append(tone(glide(a, b, rng.uniform(0.4, 2.2)), rng.uniform(0.05, 0.16), rng.uniform(0, 0.08),
+                             rng.uniform(0, 45), brightness=0.45))
+        save("astro_%d" % k, envelope(join(*bits, gap=0.02), release=0.05))
+    save("astro_scream", envelope(join(tone(glide(1200, 3200, 0.4), 0.3, 0.1, 55, brightness=0.6),
+                                       tone(glide(3200, 900, 1.5), 0.45, 0.12, 40, brightness=0.6), gap=0.0), release=0.1))
+    for k, (f, n) in enumerate(((95, 2), (82, 3)), 1):       # a power droid: a low, hollow, honking "gonk"
+        honk = [tone(lambda t, f=f: f + 0 * t, 0.22, 0.01, 4, brightness=0.95) for _ in range(n)]
+        save("gonk_%d" % k, envelope(join(*honk, gap=0.18), attack=0.02, release=0.08))
     save("countdown", envelope(join(*[tone(lambda t: 880 + 0 * t, 0.09, brightness=0.9) for _ in range(5)], gap=0.4)))
     print("wrote", sorted(p.name for p in OUT.iterdir()))
 

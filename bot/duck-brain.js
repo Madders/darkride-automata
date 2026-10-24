@@ -31,6 +31,33 @@
 //  dance, hello. Not always: each bot has an obedience (bots.json "obedience", 0-1, default 0.7), and a refusal is a
 //  sad note, a questioning "hm?" or a kick instead.
 //
+//  Personality (bots.json "personality", each 0-1; any left out come from the bot's id, so no two are alike):
+//    energy       how long it idles, how brisk its walk, how often it sits, pecks, kicks and rolls;
+//    curiosity    how much it goes to look at things (edges, walls, points of interest) and walks up to visitors;
+//    shyness      how much it keeps its distance from visitors it doesn't know (it backs off if they come close);
+//    chattiness   how often it chirps on its own and answers;
+//    sociability  how often it seeks out other bots, and goes for a walk with a friend.
+//  Memory: it remembers the visitors it has met (by name, if they have one) and how they treated it ("good" and "bad"),
+//  and the bots it has met. Old friends get a warmer welcome (a trill, a hop); a shy bot isn't shy with them; it
+//  avoids anyone who has scolded it more than praised it; and bots that have met often become friends and sometimes
+//  walk about together. With the roster's "hearing" service running, memories are kept there (POST/GET /memory/<id>)
+//  and last across restarts.
+//
+//  A mouse droid ("style": {"build": "mouse"}): a little box on hidden legs that scurries about at speed, turns on a
+//  sixpence, pauses to chatter at walls and corners, never sits or rolls, and bolts with a squeal from any stranger who
+//  comes near (it's shy whatever its personality says, unless they're an old friend).
+//
+//  An astromech ("build": "astromech", an R-unit sort): it glides along on its feet's wheels (no walk cycle), leaning
+//  back on its legs as it drives (body and legs pivot at the ankles, its feet staying flat on the floor), keeps its neck still and turns its whole dome to look at things, whistles and warbles, screams when
+//  startled, and instead of sitting or rolling spins its dome or rocks on the spot.
+//  A power droid ("build": "power", a gonk): it waddles slowly on its stubby legs, honks, and never rolls.
+//
+//  A bot with "role": "guide" (its own loader too) waits at its post by where visitors arrive. When someone new turns
+//  up and stays a moment it trundles over and offers a tour ("lines": "offer"); unless they say no, it leads them round
+//  the roster's "tour" (stops, each a spot to stand, a thing to look at and a line to say), saying "this way" now and
+//  then, stopping to call anyone who falls behind ("wait"), and giving up if they wander off ("lost"); at the end it
+//  says goodbye ("end") and goes back to its post. "Tour" (spoken) asks it for one at any time.
+//
 //  A bot with "role": "bouncer" (bots.json) runs from its own loader (bot-<id>.js, which sets BOT_ID) and guards a
 //  post instead of wandering: it watches everyone within GUARD_RANGE, swivels to follow them and turns to face anyone
 //  well off to the side, challenges arrivals with its canned lines ("lines" in the roster: a welcome for names it
@@ -63,7 +90,10 @@
     var visitorSince = {}, greetedAt = {}, lastTick = 0, lastSaid = 0, hopsOf = {}, flame = null;
     var GUARD_RANGE = 15, ARRIVE_RANGE = 12, guard = null, speech = [];
     var heardChunks = [], HEARD_KEEP = 8000;          // what it heard in the last 8 s, as {t, audio}
-    var following = null, stayUntil = 0;
+    var following = null, stayUntil = 0, tour = null, guide = null;
+    var mind = { energy: 0.5, curiosity: 0.5, shyness: 0.5, chattiness: 0.5, sociability: 0.5 };
+    var memory = { visitors: {}, bots: {} }, memoryDirty = false, memorySavedAt = 0, PACE = 1, MOUSE = false, ASTRO = false, POWER = false;
+    var lean = 0, LEAN_DRIVE = 0.24, ANKLE_Y = -0.38;    // an astromech's lean back as it drives (rad); its ankles' height
     var roster = null, bot = null, SIZE = 1, GAIT = 1, area = null;
 
     function log(t) { print("duck " + (Agent.sessionUUID || "").substr(1, 4) + ": " + t); }
@@ -78,7 +108,13 @@
     // "chirp" is any of the eight short ones; one sound at a time, and not too chatty
     function say(name, chance) {
         if (chance !== undefined && Math.random() > chance) return false;
-        if (name === "chirp") name = "chirp_" + (1 + Math.floor(Math.random() * 8));
+        if (MOUSE) name = { alert: "mouse_squeal", question: "mouse_squeal", sad: "mouse_squeal", ooh: "mouse_squeal" }[name] ||
+                          (/^(rocket|servo|clank|whirr)$/.test(name) ? name : "mouse_" + (1 + Math.floor(Math.random() * 3)));
+        else if (ASTRO) name = { alert: "astro_scream", sad: "sad", ooh: "astro_scream" }[name] ||
+                          (/^(rocket|servo|clank|whirr|sad)$/.test(name) ? name : "astro_" + (1 + Math.floor(Math.random() * 5)));
+        else if (POWER) name = { sad: "sad" }[name] ||
+                          (/^(rocket|servo|clank|whirr)$/.test(name) ? name : "gonk_" + (1 + Math.floor(Math.random() * 2)));
+        else if (name === "chirp") name = "chirp_" + (1 + Math.floor(Math.random() * 8));
         if (!sounds[name]) sounds[name] = SoundCache.getSound(BASE + "sounds/" + name + ".wav");   // a bot's own lines
         var s = sounds[name];
         if (!s || !s.downloaded || Agent.isPlayingAvatarSound || Date.now() - lastSaid < 600) return false;
@@ -252,6 +288,95 @@
     }
     function dist(a, b) { return Vec3.distance(a, b); }
 
+    // ── personality and memory ──────────────────────────────────────────────
+    // a trait from the roster, or one of its own from its id (0.15-0.85), so bots without one still differ
+    function trait(name) {
+        var given = bot.personality && bot.personality[name];
+        if (given !== undefined) return clamp(given, 0, 1);
+        var h = 2166136261, key = bot.id + ":" + name;
+        for (var k = 0; k < key.length; k++) { h ^= key.charCodeAt(k); h = (h * 16777619) >>> 0; }
+        return 0.15 + 0.7 * (h % 1000) / 1000;
+    }
+    function setMind() {
+        Object.keys(mind).forEach(function (k) { mind[k] = trait(k); });
+        MOUSE = !!(bot.style && bot.style.build === "mouse");
+        ASTRO = !!(bot.style && bot.style.build === "astromech");
+        POWER = !!(bot.style && bot.style.build === "power");
+        if (MOUSE) { mind.shyness = Math.max(mind.shyness, 0.9); mind.energy = Math.max(mind.energy, 0.7); }
+        // a lively bot walks a little quicker; a mouse droid scurries, an astromech rolls along, a power droid plods
+        PACE = (0.85 + 0.3 * mind.energy) * (MOUSE ? 2.6 : ASTRO ? 1.15 : POWER ? 0.55 : 1);
+        log("personality " + JSON.stringify(mind).replace(/(\d\.\d\d)\d+/g, "$1"));
+    }
+    // who a visitor is to it: their name if they have one (remembered across visits), else this visit's session
+    function visitorKey(id) {
+        var a = AvatarList.getAvatar(id), n = a && (a.sessionDisplayName || a.displayName) || "";
+        return n && !/^anonymous/i.test(n) ? "name:" + n.toLowerCase() : "session:" + id;
+    }
+    function knownVisitor(id) { return memory.visitors[visitorKey(id)]; }
+    function remember(id, change) {
+        var k = visitorKey(id), v = memory.visitors[k] = memory.visitors[k] || { met: 0, likes: 0, first: Date.now() };
+        if (change.met) v.met++;
+        if (change.likes) v.likes = clamp(v.likes + change.likes, -5, 5);
+        v.last = Date.now();
+        if (k.indexOf("name:") === 0) memoryDirty = true;  // only named visitors are worth keeping
+        return v;
+    }
+    function friendly(id) { var v = knownVisitor(id); return v && v.met >= 2 && v.likes >= 0; }
+    function wary(id) { var v = knownVisitor(id); return v && v.likes < 0; }
+    function botId(session) { var h = heard[String(session)]; return h && h.bot; }
+    function botFriend(session) { var b = botId(session); return b && (memory.bots[b] || 0) >= 3; }
+    function memoryUrl() {
+        var u = roster.memory || (roster.hearing && roster.hearing.replace(/\/hear$/, "/memory"));
+        return u ? u + "/" + bot.id : null;
+    }
+    function loadMemory() {
+        var u = memoryUrl();
+        if (!u) return;
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", u, true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr.status !== 200) return;
+            try {
+                var m = JSON.parse(xhr.responseText);
+                if (m && m.visitors) {
+                    memory = { visitors: m.visitors, bots: m.bots || {} };
+                    log("remembers " + Object.keys(memory.visitors).length + " visitors and " + Object.keys(memory.bots).length + " bots");
+                }
+            } catch (e) { /* nothing kept */ }
+        };
+        xhr.send();
+    }
+    function saveMemory(now) {
+        var u = memoryUrl();
+        if (!u || !memoryDirty || now - memorySavedAt < 60000) return;
+        memoryDirty = false; memorySavedAt = now;
+        var keep = { visitors: {}, bots: memory.bots };
+        Object.keys(memory.visitors).forEach(function (k) { if (k.indexOf("name:") === 0) keep.visitors[k] = memory.visitors[k]; });
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", u, true);
+        xhr.send(JSON.stringify(keep));
+    }
+    // a shy bot backs off from a stranger who comes too close (not from friends, and not while it's busy)
+    function shyOf(near, now) {
+        if (mind.shyness < 0.45 || following || now < stayUntil) return false;
+        if (!(state.name === "idle" || state.name === "walk" || state.name === "act" && state.kind !== "listen" && state.kind !== "greet")) return false;
+        var close = 0.9 + 1.6 * mind.shyness;
+        for (var k = 0; k < near.length; k++) {
+            var o = near[k];
+            if (o.duck || friendly(o.id) || dist(o.pos, me.pos) > close * SIZE + 0.5) continue;
+            if (now - (ear.shyAt || 0) < 6000) return false;
+            ear.shyAt = now;
+            var away = Vec3.normalize(Vec3.subtract(me.pos, o.pos));
+            var c = nearestCell(Vec3.sum(me.pos, Vec3.multiply((MOUSE ? 5 : 2.5) + 2 * mind.shyness, away)), 0.6);
+            if (allowed(c) && !isEdge(c)) {
+                say(MOUSE || Math.random() < 0.5 ? "alert" : "question");
+                goTo(c, { name: "turn-to", at: o.pos }, "shy of a visitor");
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ── deciding what to do ─────────────────────────────────────────────────
     function goTo(cell, then, why) {
         var t0 = Date.now();
@@ -261,45 +386,62 @@
         path = p; pathAt = 1; plannedAt = Date.now(); progressAt = Date.now(); lastPos = me.pos;
         state = { name: "walk", then: then, why: why };
     }
-    function idle(seconds) { state = { name: "idle", until: Date.now() + seconds * 1000 }; }
+    // (a lively bot idles less, a lazy one more)
+    function idle(seconds) { state = { name: "idle", until: Date.now() + seconds * 1000 * (1.5 - mind.energy) }; }
 
     function decide() {
         var near = others(), now = Date.now();
         if (now < stayUntil) { idle(4); return; }                    // told to stay
         if (following) {                                             // told to follow: keep close to them
             var f = following.who && AvatarList.getAvatar(following.who);
-            if (!f || !f.position || now > following.until) { following = null; say("chirp", 0.5); }
+            if (!f || !f.position || now > following.until) { following = null; say(f && f.position ? "trill" : "chirp", 0.5); }
             else {
                 if (dist(f.position, me.pos) > 2.2 + SIZE) comeTo(f.position, { name: "idle" });
                 else idle(1.5);
                 return;
             }
         }
-        // a visitor who's been close a while: go and say hello now and then
+        // a visitor who's been close a while: go and say hello now and then (sooner for a curious bot, and for old
+        // friends; a shy one mostly leaves strangers be, and anyone who scolded it is left alone)
+        var noticeAfter = 6000 - 4500 * mind.curiosity;
         for (var k = 0; k < near.length; k++) {
             var o = near[k], d = dist(o.pos, me.pos);
-            if (!o.duck && d < LOOK_RANGE && now - (visitorSince[o.id] || now) > 4000 && now - (greetedAt[o.id] || 0) > 90000) {
+            if (!o.duck && d < LOOK_RANGE * (0.8 + 0.5 * mind.curiosity) && now - (visitorSince[o.id] || now) > noticeAfter &&
+                now - (greetedAt[o.id] || 0) > (friendly(o.id) ? 45000 : 90000)) {
                 greetedAt[o.id] = now;
+                if (wary(o.id)) { say("sad", 0.5); continue; }
+                if (!friendly(o.id) && (MOUSE || Math.random() < mind.shyness * 0.8)) continue;
                 var spot = nearestCell(Vec3.sum(o.pos, Vec3.multiply(0.8 + 0.5 * SIZE, Vec3.normalize(Vec3.subtract(me.pos, o.pos)))), 1.2);
-                if (allowed(spot)) { goTo(spot, { name: "greet", who: o.id }, "a visitor"); return; }
+                if (allowed(spot)) { goTo(spot, { name: "greet", who: o.id }, friendly(o.id) ? "an old friend" : "a visitor"); return; }
             }
-            if (o.duck && d < 12 && now - (greetedAt[o.id] || 0) > 120000) {
+            var seekAfter = (botFriend(o.id) ? 60000 : 200000) * (1.3 - mind.sociability);
+            if (o.duck && d < 6 + 12 * mind.sociability && now - (greetedAt[o.id] || 0) > seekAfter) {
                 greetedAt[o.id] = now;
                 var meet = nearestCell(Vec3.mix(me.pos, o.pos, 0.4), 1.2);
-                if (allowed(meet)) { goTo(meet, { name: "greet", who: o.id, duck: true }, "the other duck"); return; }
+                if (allowed(meet)) { goTo(meet, { name: "greet", who: o.id, duck: true }, botFriend(o.id) ? "a friend" : "another bot"); return; }
             }
         }
         // something on the spot now and then: a sit, a peck at the ground, a kick, or a roll if there's room
-        if (me.node >= 0 && !isEdge(me.node) && Math.random() < 0.22) {
+        if (MOUSE && Math.random() < 0.3) { say("chirp", 0.5); idle(rnd(0.5, 2)); return; }    // a pause, a chatter
+        if (ASTRO && Math.random() < 0.1 + 0.25 * mind.energy) {                             // a dome spin and a whistle
+            say("chirp");
+            state = { name: "act", kind: "spin", start: Date.now(), until: Date.now() + rnd(2500, 4500), headOverride: true,
+                      dir: Math.random() < 0.5 ? -1 : 1 };
+            return;
+        }
+        if (!MOUSE && !ASTRO && me.node >= 0 && !isEdge(me.node) && Math.random() < 0.1 + 0.25 * mind.energy) {
             var m = Math.random();
             if (m < 0.3) startMove("peck");
             else if (m < 0.55) startMove("sit", null, rnd(6, 20));
-            else if (m < 0.75 && clearAhead(2.5 * SIZE)) startMove("roll");
+            else if (m < 0.75 && !POWER && clearAhead(2.5 * SIZE)) startMove("roll");
             else startMove(Math.random() < 0.5 ? "kick_left" : "kick_right");
             return;
         }
-        say("chirp", 0.1);
-        var roll = Math.random(), target = -1, then = null, why = "";
+        say("chirp", 0.03 + 0.25 * mind.chattiness);
+        // a curious bot goes to look at things more than it just wanders
+        var target = -1, then = null, why = "";
+        var roll = Math.random() < 0.4 + 0.5 * mind.curiosity ? Math.random() * 0.72 : 0.72 + Math.random() * 0.28;
+        if (MOUSE && roll < 0.42) roll = 0.3;                         // a mouse droid hugs walls, never peers over
         if (roll < 0.25) {                                            // peer over an edge
             target = pickCell(function (i) { return isEdge(i); });
             then = { name: "peer" }; why = "an edge";
@@ -364,7 +506,7 @@
 
     // ── voice commands ──────────────────────────────────────────────────────
     function keepHearing() {
-        if (!roster.hearing || bot.role) return;
+        if (!roster.hearing || bot.role === "bouncer") return;
         var chunk = Agent.takeHeardAudio();
         if (!chunk || !chunk.byteLength) return;
         var now = Date.now();
@@ -398,7 +540,8 @@
         xhr.send(all.buffer);
     }
     // what was said, as {act, bot}: the first command word, and a bot's name if one was said
-    var WORDS = { sit: "sit", jump: "jump", roll: "roll", come: "come", here: "come", follow: "follow", stay: "stay",
+    var WORDS = { tour: "tour", yes: "yes", okay: "yes", sure: "yes",
+                  sit: "sit", jump: "jump", roll: "roll", come: "come", here: "come", follow: "follow", stay: "stay",
                   stop: "stay", wait: "stay", away: "away", dance: "dance", spin: "dance", hello: "hello", hi: "hello",
                   good: "good", bad: "bad", no: "bad" };
     function commandIn(text) {
@@ -412,12 +555,15 @@
     // a command for this bot (or for any bot close to the speaker): do it, mostly
     function obey(m) {
         var now = Date.now(), at = m.near ? { x: m.near[0], y: m.near[1], z: m.near[2] } : me.pos;
-        if (bot.role || state.name === "hop" || state.name === "move") return;
+        if (bot.role === "guide") { guideObey(m); return; }
+        if (bot.role || state.name === "hop" || state.name === "move" || m.act === "tour" || m.act === "yes") return;
         if (!m.bot && dist(at, me.pos) > LISTEN_RANGE + 1) return;
         var face = Math.atan2(-(at.x - me.pos.x), -(at.z - me.pos.z));
-        if (m.act === "good") { say("trill"); look.nod = 0.3; return; }
-        if (m.act === "bad") { say("sad"); return; }
-        if (Math.random() > (bot.obedience !== undefined ? bot.obedience : 0.7)) {
+        if (m.act === "good") { if (m.speaker) remember(m.speaker, { likes: 1 }); say("trill"); look.nod = 0.3; return; }
+        if (m.act === "bad") { if (m.speaker) remember(m.speaker, { likes: -1 }); say("sad"); return; }
+        var willing = (bot.obedience !== undefined ? bot.obedience : 0.7) + (m.speaker && friendly(m.speaker) ? 0.15 : 0) -
+                      (m.speaker && wary(m.speaker) ? 0.3 : 0);
+        if (Math.random() > willing) {
             log("won't " + m.act);
             var refuse = Math.random();
             if (refuse < 0.4) say("sad");
@@ -425,6 +571,7 @@
             else { say("chirp"); startMove(Math.random() < 0.5 ? "kick_left" : "kick_right"); }
             return;
         }
+        if ((MOUSE || ASTRO) && (m.act === "sit" || m.act === "roll") || POWER && m.act === "roll") { say("question"); return; }
         log("doing " + m.act);
         following = null;
         if (m.act === "sit") { say("chirp_5"); startMove("sit", null, rnd(8, 15)); }
@@ -478,14 +625,20 @@
         if (bot.role === "bouncer") { guardTick(dt, now, near); return; }
 
         // someone talking to us: stop what we're doing (unless mid-move or peering over a drop) and face them
-        if (listening(now) && now - ear.heardAt < 500 && now > ear.boredUntil &&
+        if (bot.role === "guide" && tour && state.name === "walk") keepTogether(now);
+        if (listening(now) && now - ear.heardAt < 500 && now > ear.boredUntil && !tour &&
             (state.name === "walk" || state.name === "idle" ||
              state.name === "act" && (state.kind === "look" || state.kind === "wall" || state.kind === "greet"))) {
             state = { name: "turn", yaw: yawTowards(ear.pos),
                       after: { name: "act", kind: "listen", start: now, until: now + 6000 } };
         }
 
-        if (state.name === "start" || state.name === "idle" && now > state.until) decide();
+        if (bot.role !== "guide" && shyOf(near, now)) { /* backing off */ }
+        else if (state.name === "start" || state.name === "idle" && now > state.until) {
+            if (bot.role === "guide") guideDecide(near, now); else decide();
+        }
+        if (state.name === "walk" && Math.random() < dt * 0.02 * mind.chattiness) say("chirp", 0.6);
+        saveMemory(now);
 
         if (state.name === "walk") walk(dt, now);
         else if (state.name === "turn") turnTo(dt, state.yaw, state.after);
@@ -497,6 +650,89 @@
         var lookAt = listening(now) ? ear.pos : state.name === "act" && state.lookAt ? state.lookAt : watch;
         if (state.name === "move" && !state.sat) lookAt = null;
         steerHead(lookAt, dt, now, state.name === "act" ? state.headOverride : null);
+    }
+
+    // ── a guide ─────────────────────────────────────────────────────────────
+    function guideDecide(near, now) {
+        var g = guide = guide || { seen: {}, offered: {}, nextMutter: now + 90000 };
+        if (tour) {
+            var v = AvatarList.getAvatar(tour.who);
+            if (!v || !v.position) { endTour("lost"); return; }
+            if (now < tour.start) { idle(0.8); return; }                  // waiting to see if they'll say no
+            var d = dist(v.position, me.pos);
+            if (d > 9) {                                                  // they've fallen behind: wait, and call
+                tour.lostSince = tour.lostSince || now;
+                if (now - tour.lostSince > 30000) { endTour("lost"); return; }
+                waitFor(v.position, now);
+                return;
+            }
+            tour.lostSince = 0;
+            if (tour.stop >= bot.tour.length) { endTour("end"); return; }
+            var s = bot.tour[tour.stop], c = nearestCell({ x: s.at[0], y: s.at[1], z: s.at[2] }, 1.0);
+            if (!allowed(c)) { log("can't reach tour stop " + (tour.stop + 1)); tour.stop++; idle(0.2); return; }
+            if (tour.stop > 0 && Math.random() < 0.6) { var f = line("follow"); if (f) sayInTurn([].concat(f)); }
+            goTo(c, { name: "stop", i: tour.stop }, "tour stop " + (tour.stop + 1));
+            return;
+        }
+        // someone new who's stayed a moment, not offered one lately: go and offer them a tour
+        var post = bot.post ? { x: bot.post[0], y: bot.post[1], z: bot.post[2] } : me.pos;
+        for (var k = 0; k < near.length; k++) {
+            var o = near[k];
+            if (o.duck || heard[String(o.id)] || dist(o.pos, post) > ARRIVE_RANGE) { delete g.seen[o.id]; continue; }
+            g.seen[o.id] = g.seen[o.id] || now;
+            var key = visitorKey(o.id);
+            if (now - g.seen[o.id] > 4000 && now - (g.offered[key] || 0) > 600000) {
+                g.offered[key] = now;
+                var spot = nearestCell(Vec3.sum(o.pos, Vec3.multiply(1.6, Vec3.normalize(Vec3.subtract(me.pos, o.pos)))), 1.2);
+                if (allowed(spot)) { say("chirp"); goTo(spot, { name: "offer", who: o.id }, "a newcomer"); return; }
+            }
+        }
+        // otherwise back to its post, and wait there
+        if (bot.post && dist(me.pos, post) > 1.2) {
+            var home = nearestCell(post, 1.0);
+            if (allowed(home)) { goTo(home, { name: "post" }, "back to its post"); return; }
+        }
+        if (now > g.nextMutter) {
+            g.nextMutter = now + rnd(120000, 300000);
+            var m = line("idle");
+            if (m) sayInTurn([].concat(m));
+        }
+        idle(rnd(2, 4));
+    }
+    // on the way to a stop: if they're lagging, stop and wait for them
+    function keepTogether(now) {
+        var v = AvatarList.getAvatar(tour.who);
+        if (v && v.position && dist(v.position, me.pos) > 7) waitFor(v.position, now);
+    }
+    function waitFor(at, now) {
+        state = { name: "turn", yaw: yawTowards(at),
+                  after: { name: "act", kind: "wait", start: now, until: now + 3000, lookAt: Vec3.sum(at, { x: 0, y: 0.6, z: 0 }) } };
+        if (now - (tour.calledAt || 0) > 9000) { tour.calledAt = now; var w = line("wait"); if (w) sayInTurn([].concat(w)); else say("question"); }
+    }
+    function endTour(why) {
+        var l = line(why);
+        if (l) sayInTurn([].concat(l));
+        log("tour over: " + why);
+        tour = null;
+        idle(3);
+    }
+    function guideObey(m) {
+        var now = Date.now(), at = m.near ? { x: m.near[0], y: m.near[1], z: m.near[2] } : me.pos;
+        if (!m.bot && dist(at, me.pos) > LISTEN_RANGE + 2) return;
+        if (m.act === "good") { if (m.speaker) remember(m.speaker, { likes: 1 }); say("trill"); return; }
+        if (tour && (m.act === "bad" || m.act === "away" || m.act === "stay")) {
+            if (now < tour.start) { var no = line("decline"); if (no) sayInTurn([].concat(no)); tour = null; idle(2); }
+            else endTour("end");
+            return;
+        }
+        if (tour && m.act === "yes") { tour.start = now; return; }
+        if (!tour && (m.act === "tour" || m.act === "yes" || m.act === "follow")) {
+            log("asked for a tour");
+            tour = { who: m.speaker, stop: 0, start: now };
+            var f = line("follow");
+            if (f) sayInTurn([].concat(f));
+            idle(1);
+        }
     }
 
     // ── a bouncer at its post ───────────────────────────────────────────────
@@ -564,8 +800,9 @@
             return;
         }
         if (Math.abs(err) > TURN_FIRST) { state = { name: "turn", yaw: want, after: state }; return; }
-        me.yaw = wrap(me.yaw + clamp(err, -STEER * dt, STEER * dt));
-        var speed = cyc.cycles.walk.speed * SPEEDUP * SIZE / GAIT;
+        me.yaw = wrap(me.yaw + clamp(err, -STEER * (MOUSE ? 3 : 1) * dt, STEER * (MOUSE ? 3 : 1) * dt));
+        if (MOUSE && Math.random() < dt * 0.25) say("whirr", 0.5);
+        var speed = cyc.cycles.walk.speed * SPEEDUP * SIZE / GAIT * PACE;
         var step = speed * dt;
         var here = cellPos(path[pathAt]);
         var fwd = { x: -Math.sin(me.yaw), z: -Math.cos(me.yaw) };
@@ -578,7 +815,7 @@
             pathAt++;
             me.node = path[pathAt];
         }
-        setCycle("walk");
+        if (ASTRO) setCycle("idle"); else setCycle("walk", PACE);
         if (dist(me.pos, lastPos) > 0.5) { lastPos = me.pos; progressAt = now; }
         if (pathAt >= path.length - 1) arrive(state.then);
         else if (now - progressAt > 8000) { log("stuck, replanning"); idle(1); }
@@ -634,8 +871,9 @@
     function turnTo(dt, yaw, after) {
         var err = wrap(yaw - me.yaw);
         if (Math.abs(err) < 0.12) { state = after; return; }
-        me.yaw = wrap(me.yaw + clamp(err, -TURN_RATE / GAIT * dt, TURN_RATE / GAIT * dt));
-        setCycle(err > 0 ? "turn_left" : "turn_right", 2);
+        var rate = TURN_RATE / GAIT * (MOUSE ? 4 : ASTRO ? 2 : 1);
+        me.yaw = wrap(me.yaw + clamp(err, -rate * dt, rate * dt));
+        setCycle(ASTRO ? "idle" : err > 0 ? "turn_left" : "turn_right", 2);
         if (bot.role === "bouncer") {                // a heavy foot coming down every step or so
             state.stepAt = (state.stepAt || 0) + dt;
             if (state.stepAt > 1.3 * GAIT / 1.7) { state.stepAt = 0; say("clank"); }
@@ -657,9 +895,30 @@
                       after: { name: "act", kind: "look", start: now, until: now + rnd(3, 6), lookAt: then.at } };
         } else if (then.name === "greet") {
             var who = then.who && AvatarList.getAvatar(then.who), at = who && who.position ? who.position : (ear.pos || me.pos);
+            var old = false;
+            if (then.who && then.duck) { var b = botId(then.who); if (b) { memory.bots[b] = (memory.bots[b] || 0) + 1; memoryDirty = true; } }
+            else if (then.who) old = remember(then.who, { met: true }).met > 2;
             state = { name: "turn", yaw: yawTowards(at),
-                      after: { name: "act", kind: "greet", duck: then.duck, start: now, until: now + 3500,
+                      after: { name: "act", kind: "greet", duck: then.duck, who: then.who, old: old, start: now, until: now + 3500,
                                lookAt: Vec3.sum(at, { x: 0, y: then.duck ? 0 : 0.6, z: 0 }) } };
+        } else if (then.name === "stop") {
+            var stop = bot.tour[then.i], sight = { x: stop.look[0], y: stop.look[1], z: stop.look[2] };
+            state = { name: "turn", yaw: yawTowards(sight),
+                      after: { name: "act", kind: "show", start: now, until: now + 4000, lookAt: sight } };
+            if (stop.say) sayInTurn([].concat(stop.say));
+        } else if (then.name === "post") {
+            state = { name: "turn", yaw: bot.facing !== undefined ? bot.facing : me.yaw, after: { name: "idle", until: now + 3000 } };
+        } else if (then.name === "offer") {
+            var v = AvatarList.getAvatar(then.who), there = v && v.position ? v.position : me.pos;
+            var back = remember(then.who, { met: true }).met > 1;
+            state = { name: "turn", yaw: yawTowards(there),
+                      after: { name: "act", kind: "greet", start: now, until: now + 3500, lookAt: Vec3.sum(there, { x: 0, y: 0.6, z: 0 }) } };
+            var offer = (back && line("again")) || line("offer");
+            if (offer) sayInTurn([].concat(offer));
+            tour = { who: then.who, stop: 0, start: now + 7000 };       // a moment to say no
+            log("offering a tour" + (back ? " (again)" : ""));
+        } else if (then.name === "turn-to") {
+            state = { name: "turn", yaw: yawTowards(then.at), after: { name: "idle", until: now + 2500 } };
         }
         log("at " + (then.name) + " (" + nav.cells[me.node][2].toFixed(1) + " m up)");
     }
@@ -679,7 +938,11 @@
         } else if (state.kind === "greet") {
             state.pose = null;
             look.nod = 0.35 * Math.max(0, Math.sin(t * 6)) * (t < 2.4 ? 1 : 0);
-            if (!state.said) state.said = say(state.duck ? "trill" : "chirp") || t > 1;
+            if (!state.said) state.said = say(state.duck || state.old ? "trill" : "chirp") || t > 1;
+        } else if (state.kind === "spin") {
+            state.pose = { neck: 0, headPitch: 0, headYaw: state.dir * 1.25 * Math.sin(t * 2.2), headRoll: 0 };
+        } else if (state.kind === "show") {
+            if (speech.length || Agent.isPlayingAvatarSound) state.until = Math.max(state.until, now + 1800);
         } else if (state.kind === "listen") {
             // keep facing them, and stay while they keep talking (but not for ever)
             state.until = Math.max(state.until, ear.heardAt + 6000);
@@ -691,13 +954,22 @@
         }
         if (now > state.until) {
             look.nod = 0;
+            if (state.kind === "show") { if (tour) tour.stop++; idle(0.3); return; }
+            if (bot.role === "guide") { idle(0.5); return; }
             if (state.kind === "peer") {
                 // back away from the edge: a cell a few metres the other way
                 var away = Vec3.sum(me.pos, Vec3.multiply(3, { x: Math.sin(me.yaw), y: 0, z: Math.cos(me.yaw) }));
                 var c = nearestCell(away, 0.6);
                 if (allowed(c)) { goTo(c, { name: "idle" }, "away from the edge"); return; }
             }
-            if (state.kind === "greet" && Math.random() < 0.35) {
+            if (state.kind === "greet" && state.old && Math.random() < 0.5) { jumpInPlace(); return; }   // pleased to see you
+            if (state.kind === "greet" && state.duck && state.who && botFriend(state.who) && Math.random() < mind.sociability) {
+                following = { who: state.who, until: now + rnd(30000, 70000), buddy: true };              // walk together a while
+                log("going for a walk with " + botId(state.who));
+                idle(0.5);
+                return;
+            }
+            if (state.kind === "greet" && !MOUSE && !ASTRO && Math.random() < 0.35) {
                 // show off a little (no roll: someone's right in front)
                 if (Math.random() < 0.5) startMove("sit", null, rnd(3, 6));
                 else startMove(Math.random() < 0.5 ? "kick_left" : "kick_right");
@@ -785,13 +1057,21 @@
     var HALF_TURN = { x: 0, y: 1, z: 0, w: 0 };
     function applyRow(row, k0) {
         var abs = { Hips: Quat.multiply(HALF_TURN, { x: row[k0], y: row[k0 + 1], z: row[k0 + 2], w: row[k0 + 3] }) };
+        var level = ASTRO ? { Hips: HALF_TURN } : null;            // (the same chain without the lean)
+        if (ASTRO) abs.Hips = Quat.multiply(HALF_TURN, Quat.angleAxis(lean * 180 / Math.PI, Vec3.UNIT_X));
         rotations[order[0]] = abs.Hips;
         for (var j = 0; j < cyc.joints.length; j++) {
             var name = cyc.joints[j], k = k0 + 4 + j * 4;
             var q = { x: row[k], y: row[k + 1], z: row[k + 2], w: row[k + 3] };
-            var extra = look.weight > 0.01 ? headAngle(name) : null;
-            if (extra !== null) q = Quat.slerp(q, jointQuat(name, cyc.rest[name] + extra), look.weight);
+            var extra = look.weight > 0.01 || ASTRO ? headAngle(name) : null;
+            if (ASTRO && extra !== null) q = jointQuat(name, cyc.rest[name] + (name === "head_yaw" ? extra * look.weight : 0));
+            else if (ASTRO) q = jointQuat(name, cyc.rest[name]);       // legs at rest: they're rigid struts
+            else if (extra !== null) q = Quat.slerp(q, jointQuat(name, cyc.rest[name] + extra), look.weight);
             abs[name] = Quat.multiply(abs[cyc.parents[name]], q);
+            if (level) {
+                level[name] = Quat.multiply(level[cyc.parents[name]], q);
+                if (/_ankle$/.test(name)) abs[name] = level[name];       // the feet stay flat on the floor
+            }
             rotations[order[j + 1]] = abs[name];
         }
         for (var e = 0; e < extraJoints.length; e++) rotations[extraJoints[e]] = HALF_TURN;
@@ -817,6 +1097,13 @@
         var frame = c.frames[Math.floor(cycleTime * cyc.fps) % c.frames.length];
         Avatar.position = { x: me.pos.x, y: me.pos.y + (cyc.trunkHeight + frame[0]) * SIZE, z: me.pos.z };
         Avatar.orientation = yawQuat(me.yaw);
+        if (ASTRO) {
+            // lean back while driving, easing in and out; the body turns about its hips, so shift it to keep the line
+            // through its ankles still (the pivot), and the feet (on the ankles) are held level in applyRow
+            lean += ((state.name === "walk" ? LEAN_DRIVE : 0) - lean) * Math.min(1, dt * 2.5);
+            var keep = { x: 0, y: ANKLE_Y * (1 - Math.cos(lean)) * SIZE, z: -ANKLE_Y * Math.sin(lean) * SIZE };
+            Avatar.position = Vec3.sum(Avatar.position, Vec3.multiplyQbyV(Avatar.orientation, keep));
+        }
         if (order) applyRow(frame, 1);
     }
     // the avatar's joint order: the .fst's jointIndex list, which matches the skeleton a viewer builds (ROOT, the duck's
@@ -927,7 +1214,10 @@
         me.yaw = b.facing !== undefined ? b.facing : rnd(-Math.PI, Math.PI);
         if (b.post) me.pos = { x: b.post[0], y: cellPos(start).y, z: b.post[2] };
         state = { name: b.role === "bouncer" ? "guard" : "start" };
-        guard = null;
+        guard = null; tour = null; guide = null;
+        setMind();
+        memory = { visitors: {}, bots: {} };
+        loadMemory();
         announce();
         log("I'm " + b.name + " (size " + SIZE + (b.climbs === false ? ", no stairs" : "") + (b.home ? ", home " + b.home : "") +
             "), hatched at " + JSON.stringify(me.pos));
@@ -986,6 +1276,7 @@
         Script.update.connect(update);
     }, 6000 + Math.random() * 9000);
     Script.scriptEnding.connect(function () {
+        if (bot) { memorySavedAt = 0; saveMemory(Date.now()); }
         Messages.unsubscribe(CHANNEL);
         Messages.unsubscribe(CHANNEL + ".cmd");
     });

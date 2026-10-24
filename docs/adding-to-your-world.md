@@ -53,7 +53,7 @@ referenced relative to `duck-bot.js`.
 ## 5. The domain
 
 In the domain's admin pages, **Content > Scripts > Persistent Scripts**: add the URL of `duck-bot.js`, with **one
-instance per wandering bot**, and for each bot with a role (a bouncer) its own `bot-<id>.js` with one instance; save
+instance per wandering bot**, and for each bot with a role (a bouncer, a guide) its own `bot-<id>.js` with one instance; save
 (the domain restarts). Speaking bots' lines are made on Windows by package.py (tools/make_voice.py). Then:
 
 - **Assignment clients**: each bot needs one of its own, beside the mixers. Start the domain's assignment-client

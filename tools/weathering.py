@@ -1,5 +1,6 @@
-"""Weathered paint for the bots, Star Wars droid style (2026-10-24): one texture per bot for its shell and one for its
-dark metal, from its colours and its wear (0 factory-fresh to 1 beaten up).
+"""Weathered paint for the bots, Star Wars droid style (2026-10-24): textures per bot for its shell, its dark metal, its
+bare metal and its trim (second paint), from its colours and its wear (0 factory-fresh to 1 beaten up); and with each
+a normal map, so panel lines, rivets, chips and scratches catch the light as relief rather than being painted flat.
 
 The shell: its colour with a little fade across it, panels with dark panel lines and grime gathered along them, some
 panels in a second paint (like R2-D2's blue), a stencilled unit number and, on the worn ones, hazard stripes; then
@@ -61,10 +62,11 @@ def font(size):
     return ImageFont.load_default()
 
 
-def shell_texture(bot, seed):
+def shell_texture(bot, seed, colour=None, markings=True, second_panels=True):
+    """The painted shell (or, with colour, another painted or bare part): (texture PNG, normal map PNG)."""
     rng = np.random.default_rng(seed)
     wear = bot.get("wear", 0.3)
-    colour = np.array(bot["shell"], float)
+    colour = np.array(bot["shell"] if colour is None else colour, float)
     second = np.array(bot.get("paint2", list(np.array(bot["accent"]) * 0.55 + colour * 0.15)), float)
     img = np.ones((N, N, 3)) * colour
     img *= (1 + (noise(rng, 3) - 0.5) * (0.08 + 0.15 * wear))[..., None]          # uneven paint, fading
@@ -72,7 +74,7 @@ def shell_texture(bot, seed):
     # panels: a few in the second paint; then the lines between them, with grime gathered along them
     plates = panels(rng)
     for x0, y0, x1, y1 in plates:
-        if rng.random() < 0.18:
+        if rng.random() < 0.18 and second_panels:
             img[y0 + 3:y1 - 3, x0 + 3:x1 - 3] = second * (0.95 + 0.1 * rng.random())
     lines = Image.new("L", (N, N), 0)
     d = ImageDraw.Draw(lines)
@@ -82,6 +84,8 @@ def shell_texture(bot, seed):
             if x1 - x0 > 60 and y1 - y0 > 60:
                 d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=200)
     line = np.asarray(lines, float) / 255
+    height = 1 - 0.9 * np.asarray(lines.filter(ImageFilter.GaussianBlur(1.2)), float) / 255    # grooves, rivets as bumps
+    height += 0.6 * (np.asarray(lines, float) == 200)
     near = np.asarray(lines.filter(ImageFilter.GaussianBlur(10 + 14 * wear)), float) / 255
     img *= (1 - 0.55 * line)[..., None]
     img *= (1 - np.clip(near * (0.6 + 1.6 * wear), 0, 0.55))[..., None]
@@ -91,10 +95,10 @@ def shell_texture(bot, seed):
     dm = ImageDraw.Draw(marks)
     ink = (25, 25, 30, 230) if colour.mean() > 0.45 else (225, 225, 215, 220)
     label = bot.get("unit", "MP-%02d" % (seed % 97))
-    for k in range(2):
+    for k in range(2 if markings else 0):
         x, y = rng.integers(80, N - 260), rng.integers(80, N - 120)
         dm.text((x, y), label, font=font(int(rng.integers(36, 64))), fill=ink)
-    if wear > 0.35:
+    if wear > 0.35 and markings:
         x, y = rng.integers(60, N - 300), rng.integers(60, N - 140)
         for k in range(8):
             c = (230, 180, 20, 235) if k % 2 == 0 else (20, 20, 20, 235)
@@ -122,6 +126,7 @@ def shell_texture(bot, seed):
     rim = np.clip(np.asarray(chips.filter(ImageFilter.MaxFilter(5)), float) / 255 - chip, 0, 1)
     under = np.where((noise(rng, 20, 2) > 0.5)[..., None], BARE, PRIMER)     # bare metal or the primer under
     img = img * (1 - chip[..., None]) + under * chip[..., None]
+    height -= 0.35 * np.asarray(chips.filter(ImageFilter.GaussianBlur(1)), float) / 255         # chipped-off paint
     img *= (1 - 0.45 * rim)[..., None]
     scratches = Image.new("L", (N, N), 0)
     ds = ImageDraw.Draw(scratches)
@@ -131,6 +136,8 @@ def shell_texture(bot, seed):
         ds.line((x, y, x + ln * np.cos(a), y + ln * np.sin(a)), fill=int(rng.integers(60, 160)), width=1)
     s = np.asarray(scratches, float)[..., None] / 255
     img = img * (1 - 0.6 * s) + BARE * 0.6 * s
+    height -= 0.25 * s[..., 0]
+    height += (noise(rng, 40, 2) - 0.5) * 0.12 * (0.3 + wear)                                  # dents and pitting
     grime = noise(rng, 6) ** 2
     img *= (1 - np.clip(grime * (0.15 + 0.9 * wear), 0, 0.6))[..., None]
     if wear > 0.5:
@@ -151,14 +158,26 @@ def shell_texture(bot, seed):
                         fill=int(60 + 80 * rng.random()), width=1)
         st = np.asarray(streaks.filter(ImageFilter.GaussianBlur(2)), float)[..., None] / 255
         img = img * (1 - st) + RUST * st
-    return to_png(img)
+    return to_png(img), normal_map(height)
 
 
 def dark_texture(bot, seed):
+    """The dark metal: gunmetal plates with faint panel lines and rivets, scratches and grime: (PNG, normal map PNG)."""
     rng = np.random.default_rng(seed + 1)
     wear = bot.get("wear", 0.3)
     img = np.ones((N, N, 3)) * np.array([0.085, 0.09, 0.105])
     img *= (1 + (noise(rng, 4) - 0.5) * 0.4)[..., None]
+    lines = Image.new("L", (N, N), 0)
+    d = ImageDraw.Draw(lines)
+    for x0, y0, x1, y1 in panels(rng, 3):
+        d.rectangle((x0, y0, x1 - 1, y1 - 1), outline=255, width=2)
+        if x1 - x0 > 60 and y1 - y0 > 60:
+            for cx, cy in ((x0 + 8, y0 + 8), (x1 - 9, y0 + 8), (x0 + 8, y1 - 9), (x1 - 9, y1 - 9)):
+                d.ellipse((cx - 3, cy - 3, cx + 3, cy + 3), fill=200)
+    line = np.asarray(lines, float) / 255
+    img *= (1 - 0.5 * line)[..., None]
+    height = 1 - 0.9 * np.asarray(lines.filter(ImageFilter.GaussianBlur(1.2)), float) / 255
+    height += 0.6 * (np.asarray(lines, float) == 200)
     scratches = Image.new("L", (N, N), 0)
     ds = ImageDraw.Draw(scratches)
     for _ in range(int(80 + 600 * wear)):
@@ -167,8 +186,17 @@ def dark_texture(bot, seed):
         ds.line((x, y, x + ln * np.cos(a), y + ln * np.sin(a)), fill=int(rng.integers(60, 160)), width=1)
     s = np.asarray(scratches, float)[..., None] / 255
     img = img * (1 - 0.6 * s) + np.array([0.45, 0.45, 0.47]) * 0.6 * s
+    height -= 0.25 * s[..., 0]
     img *= (1 - np.clip(noise(rng, 7) ** 2 * (0.2 + 0.7 * wear), 0, 0.6))[..., None]
-    return to_png(img)
+    return to_png(img), normal_map(height)
+
+
+def normal_map(height, strength=3.0):
+    """A tangent-space normal map (glTF's: +x along u, +y up the image) from a height field."""
+    dy, dx = np.gradient(height)
+    n = np.dstack([-dx * strength, dy * strength, np.ones_like(height)])     # (image rows run down v; +y is up)
+    n /= np.linalg.norm(n, axis=2, keepdims=True)
+    return to_png(n * 0.5 + 0.5)
 
 
 def spark(size=64):

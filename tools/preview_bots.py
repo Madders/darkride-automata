@@ -21,7 +21,8 @@ ZOOM = 0.8
 
 def colour(bot, material):
     return np.array({"shell": bot["shell"], "dark": [0.1, 0.1, 0.12], "glow": bot["accent"],
-                     "lens": [0.03, 0.03, 0.05]}[material])
+                     "lens": [0.03, 0.03, 0.05], "metal": [0.72, 0.73, 0.76],
+                     "trim": bot.get("paint2", bot["accent"])}[material])
 
 
 def view(parts, bot, yaw):

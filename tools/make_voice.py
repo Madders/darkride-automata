@@ -43,23 +43,27 @@ def read(path):
         return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(float) / 32768
 
 
-def machine(x, pitch):
-    """A big machine's voice from a person's: slower and lower, ring-modulated, crunched, a radio's band, an echo."""
+def machine(x, pitch, small=False):
+    """A big machine's voice from a person's: slower and lower, ring-modulated, crunched, a radio's band, an echo.
+    small (a bot's "voiceStyle": "small"): a little droid's instead, quicker and higher, a lighter warble, a tinny
+    band and hardly any echo."""
     loud = np.nonzero(np.abs(x) > 0.02)[0]                                     # trim the engine's silence
     if len(loud):
         x = x[max(0, loud[0] - 400):loud[-1] + 1200]
     n = int(len(x) / pitch)
     x = np.interp(np.linspace(0, len(x) - 1, n), np.arange(len(x)), x)          # slower and lower together
     t = np.arange(len(x)) / RATE
-    x = x * (0.6 + 0.4 * np.sin(2 * np.pi * 38 * t))                           # a mechanical warble
-    x = np.tanh(x * 4) / np.tanh(4)                                             # crunch
-    x = np.round(x * 48) / 48                                                   # a little bit-crush
+    x = x * (0.6 + 0.4 * np.sin(2 * np.pi * (72 if small else 38) * t))       # a mechanical warble
+    x = np.tanh(x * (2.5 if small else 4)) / np.tanh(2.5 if small else 4)       # crunch
+    x = np.round(x * (96 if small else 48)) / (96 if small else 48)             # a little bit-crush
     spectrum = np.fft.rfft(x)                                                   # a radio's band: 180 Hz to 3.2 kHz
     f = np.fft.rfftfreq(len(x), 1 / RATE)
-    spectrum *= (f > 180) * (f < 3200) * (1 + 0.8 * np.exp(-((f - 900) / 300) ** 2))
+    lo, hi, peak = (380, 5200, 1800) if small else (180, 3200, 900)             # (a small speaker's: tinnier)
+    spectrum *= (f > lo) * (f < hi) * (1 + 0.8 * np.exp(-((f - peak) / 400) ** 2))
     x = np.fft.irfft(spectrum, len(x))
     out = np.zeros(len(x) + int(0.3 * RATE))                                    # a metal-room echo
-    for delay, gain in ((0, 1.0), (0.045, 0.35), (0.11, 0.2), (0.21, 0.1)):
+    echoes = ((0, 1.0), (0.03, 0.15)) if small else ((0, 1.0), (0.045, 0.35), (0.11, 0.2), (0.21, 0.1))
+    for delay, gain in echoes:
         k = int(delay * RATE)
         out[k:k + len(x)] += gain * x
     return out / max(1e-6, np.abs(out).max()) * 0.85
@@ -83,7 +87,8 @@ def main():
             for name, text in bot.get("voice", {}).items():
                 raw = pathlib.Path(tmp) / (name + ".wav")
                 speak(text, raw, bot.get("voiceName", voice))
-                save(out / (name + ".wav"), machine(read(raw), bot.get("voicePitch", pitch)))
+                save(out / (name + ".wav"), machine(read(raw), bot.get("voicePitch", pitch),
+                                                    bot.get("voiceStyle") == "small"))
                 print("%-8s %-12s %s" % (bot["id"], name, text))
 
 
