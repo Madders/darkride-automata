@@ -2,3 +2,4 @@ dist/
 .navcache/
 __pycache__/
 *.zip
+.models/

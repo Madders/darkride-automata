@@ -6,6 +6,7 @@ trimesh
 embreex      # fast ray casting for the map
 shapely      # trimesh's mesh slicing (the bots' head bands)
 networkx     # trimesh's normal fixing
+vosk         # tools/hearing.py: voice commands (and a Vosk model in .models/)
 # motions/ only: recording from Pollen's policies
 mujoco
 onnxruntime

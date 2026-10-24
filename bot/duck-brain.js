@@ -25,6 +25,12 @@
 //  area it keeps to, and rockets in its feet for some (hopping up to and down from upper floors at the rocket hops).
 //  A scripted avatar without an account has no display name: its looks tell it apart.
 //
+//  Voice commands (the roster's "hearing": a URL of tools/hearing.py): the bot nearest a talking visitor keeps what it
+//  hears and, when they pause, has it recognised; what was said goes out on the command channel, and the bot named
+//  (or, with no name, any bot close to the speaker) does it: sit, jump, roll, come here, follow me, stay, go away,
+//  dance, hello. Not always: each bot has an obedience (bots.json "obedience", 0-1, default 0.7), and a refusal is a
+//  sad note, a questioning "hm?" or a kick instead.
+//
 //  A bot with "role": "bouncer" (bots.json) runs from its own loader (bot-<id>.js, which sets BOT_ID) and guards a
 //  post instead of wandering: it watches everyone within GUARD_RANGE, swivels to follow them and turns to face anyone
 //  well off to the side, challenges arrivals with its canned lines ("lines" in the roster: a welcome for names it
@@ -56,6 +62,8 @@
                 boredUntil: 0, loudest: 0 };
     var visitorSince = {}, greetedAt = {}, lastTick = 0, lastSaid = 0, hopsOf = {}, flame = null;
     var GUARD_RANGE = 15, ARRIVE_RANGE = 12, guard = null, speech = [];
+    var heardChunks = [], HEARD_KEEP = 8000;          // what it heard in the last 8 s, as {t, audio}
+    var following = null, stayUntil = 0;
     var roster = null, bot = null, SIZE = 1, GAIT = 1, area = null;
 
     function log(t) { print("duck " + (Agent.sessionUUID || "").substr(1, 4) + ": " + t); }
@@ -257,6 +265,16 @@
 
     function decide() {
         var near = others(), now = Date.now();
+        if (now < stayUntil) { idle(4); return; }                    // told to stay
+        if (following) {                                             // told to follow: keep close to them
+            var f = following.who && AvatarList.getAvatar(following.who);
+            if (!f || !f.position || now > following.until) { following = null; say("chirp", 0.5); }
+            else {
+                if (dist(f.position, me.pos) > 2.2 + SIZE) comeTo(f.position, { name: "idle" });
+                else idle(1.5);
+                return;
+            }
+        }
         // a visitor who's been close a while: go and say hello now and then
         for (var k = 0; k < near.length; k++) {
             var o = near[k], d = dist(o.pos, me.pos);
@@ -318,8 +336,10 @@
             if (!o.duck && o.loud > LOUD && d < best) { best = d; speaker = o; }
             if (!o.duck && d < LISTEN_RANGE) ear.loudest = Math.max(ear.loudest, o.loud);
         });
+        keepHearing();
         if (speaker) {
             if (ear.who !== speaker.id) { ear.who = speaker.id; ear.talk = 0; log("listening to a visitor"); }
+            if (!ear.talkStart || now - ear.heardAt > 1500) ear.talkStart = now;
             ear.heardAt = now; ear.talk += dt; ear.replied = false;
             ear.replyAt = now + rnd(650, 1100);        // a beat after they stop (gaps between words are shorter)
         }
@@ -328,6 +348,7 @@
             if (!ear.replied && now > ear.replyAt && ear.talk > 0.35) {
                 ear.replied = true;
                 if (bot.role === "bouncer") { var r = line("reply"); if (r) sayInTurn([r]); }
+                else if (roster.hearing && nearestBotTo(ear.pos, near)) recognise(now, ear.who, ear.pos);
                 else say(ear.talk > 2.5 && Math.random() < 0.5 ? "question" : "chirp");
                 ear.nodUntil = now + 900;
                 ear.talk = 0;
@@ -340,6 +361,103 @@
         }
     }
     function listening(now) { return ear.who && now - ear.heardAt < 4000; }
+
+    // ── voice commands ──────────────────────────────────────────────────────
+    function keepHearing() {
+        if (!roster.hearing || bot.role) return;
+        var chunk = Agent.takeHeardAudio();
+        if (!chunk || !chunk.byteLength) return;
+        var now = Date.now();
+        heardChunks.push({ t: now, audio: chunk });
+        while (heardChunks.length && heardChunks[0].t < now - HEARD_KEEP) heardChunks.shift();
+    }
+    // am I the bot nearest this speaker? (only one has each thing said recognised)
+    function nearestBotTo(p, near) {
+        var mine = dist(p, me.pos);
+        return !near.some(function (o) { return o.duck && dist(o.pos, p) < mine - 0.05; });
+    }
+    function recognise(now, who, where) {
+        // what it heard from just before they started talking (cut by when it arrived: the mixer's pace varies)
+        var from = ear.talkStart - 700, keep = heardChunks.filter(function (c) { return c.t >= from; }), size = 0, at = 0;
+        keep.forEach(function (c) { size += c.audio.byteLength; });
+        var all = new Uint8Array(size);
+        keep.forEach(function (c) { all.set(new Uint8Array(c.audio), at); at += c.audio.byteLength; });
+        heardChunks = [];
+        var xhr = new XMLHttpRequest();
+        xhr.open("POST", roster.hearing, true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4) return;
+            var text = "";
+            try { text = JSON.parse(xhr.responseText).text || ""; } catch (e) { /* no answer */ }
+            var act = commandIn(text);
+            log("heard \"" + text + "\"" + (act ? ": " + act.act + (act.bot ? " for " + act.bot : "") : ""));
+            if (!act) { say(Math.random() < 0.4 ? "question" : "chirp"); return; }
+            Messages.sendMessage(CHANNEL + ".cmd", JSON.stringify({ bot: act.bot || null, act: act.act, near: [where.x, where.y, where.z],
+                                                                     speaker: who }));
+        };
+        xhr.send(all.buffer);
+    }
+    // what was said, as {act, bot}: the first command word, and a bot's name if one was said
+    var WORDS = { sit: "sit", jump: "jump", roll: "roll", come: "come", here: "come", follow: "follow", stay: "stay",
+                  stop: "stay", wait: "stay", away: "away", dance: "dance", spin: "dance", hello: "hello", hi: "hello",
+                  good: "good", bad: "bad", no: "bad" };
+    function commandIn(text) {
+        var words = text.toLowerCase().split(/\s+/), act = null, named = null;
+        words.forEach(function (w) {
+            if (!act && WORDS[w]) act = WORDS[w];
+            roster.bots.forEach(function (b) { if (b.name.toLowerCase() === w) named = b.id; });
+        });
+        return act ? { act: act, bot: named } : null;
+    }
+    // a command for this bot (or for any bot close to the speaker): do it, mostly
+    function obey(m) {
+        var now = Date.now(), at = m.near ? { x: m.near[0], y: m.near[1], z: m.near[2] } : me.pos;
+        if (bot.role || state.name === "hop" || state.name === "move") return;
+        if (!m.bot && dist(at, me.pos) > LISTEN_RANGE + 1) return;
+        var face = Math.atan2(-(at.x - me.pos.x), -(at.z - me.pos.z));
+        if (m.act === "good") { say("trill"); look.nod = 0.3; return; }
+        if (m.act === "bad") { say("sad"); return; }
+        if (Math.random() > (bot.obedience !== undefined ? bot.obedience : 0.7)) {
+            log("won't " + m.act);
+            var refuse = Math.random();
+            if (refuse < 0.4) say("sad");
+            else if (refuse < 0.75) say("question");
+            else { say("chirp"); startMove(Math.random() < 0.5 ? "kick_left" : "kick_right"); }
+            return;
+        }
+        log("doing " + m.act);
+        following = null;
+        if (m.act === "sit") { say("chirp_5"); startMove("sit", null, rnd(8, 15)); }
+        else if (m.act === "jump") jumpInPlace();
+        else if (m.act === "roll") { if (clearAhead(2.5 * SIZE)) startMove("roll"); else { say("sad"); jumpInPlace(); } }
+        else if (m.act === "come") comeTo(at, null);
+        else if (m.act === "follow") { following = { who: m.speaker, until: now + 90000 }; say("trill"); comeTo(at, null); }
+        else if (m.act === "stay") { stayUntil = now + 45000; say("chirp"); idle(3); }
+        else if (m.act === "away") {
+            say("sad");
+            var far = pickCell(function (i) { return dist(cellPos(i), at) > 10 && !isEdge(i); });
+            if (far >= 0) goTo(far, { name: "idle" }, "sent away");
+        } else if (m.act === "dance") {
+            say("trill");
+            state = { name: "turn", yaw: wrap(me.yaw + 3.0), after: { name: "turn", yaw: wrap(me.yaw + 6.0),
+                      after: { name: "turn", yaw: me.yaw, after: { name: "idle", until: now + 2000 } } } };
+        } else if (m.act === "hello") {
+            state = { name: "turn", yaw: face, after: { name: "act", kind: "greet", start: now, until: now + 3500,
+                                                        lookAt: Vec3.sum(at, { x: 0, y: 0.6, z: 0 }) } };
+        }
+    }
+    function comeTo(at, then) {
+        var away = Vec3.normalize(Vec3.subtract(me.pos, at));
+        var c = nearestCell(Vec3.sum(at, Vec3.multiply(0.8 + 0.5 * SIZE, away)), 1.5);
+        if (allowed(c)) goTo(c, then || { name: "greet", who: null }, "called");
+        else say("question");
+    }
+    // a little jump where it stands: a crouch and a spring (with a puff of flame for a bot with rockets)
+    function jumpInPlace() {
+        say(bot.rockets ? "rocket" : "trill");
+        state = { name: "hop", from: me.pos, to: me.pos, next: me.node, t: 0, flight: 0.7 * GAIT, arc: 0.45 * SIZE,
+                  inPlace: true, lit: !bot.rockets, after: { name: "idle", until: Date.now() + 1500 } };
+    }
 
     // ── each tick ───────────────────────────────────────────────────────────
     function tick(dt) {
@@ -473,7 +591,7 @@
         h.t += dt;
         setCycle("idle");
         var s = clamp((h.t - CROUCH) / h.flight, 0, 1);
-        if (h.t >= CROUCH && !h.lit) { h.lit = true; say("rocket"); fire(h.from, true); }
+        if (h.t >= CROUCH && !h.lit) { h.lit = true; if (!h.inPlace) say("rocket"); fire(h.from, true); }
         me.pos = { x: h.from.x + (h.to.x - h.from.x) * s, y: h.from.y + (h.to.y - h.from.y) * s + h.arc * 4 * s * (1 - s),
                    z: h.from.z + (h.to.z - h.from.z) * s };
         if (h.lit && !h.landed) moveFire(me.pos);
@@ -481,6 +599,7 @@
         if (h.t >= CROUCH + h.flight + SETTLE) {
             me.pos = h.to; me.node = h.next;
             state = h.after;
+            if (h.inPlace) return;
             pathAt++;
             progressAt = now; lastPos = me.pos;
             if (pathAt >= path.length - 1) arrive(state.then);
@@ -537,7 +656,7 @@
             state = { name: "turn", yaw: yawTowards(then.at),
                       after: { name: "act", kind: "look", start: now, until: now + rnd(3, 6), lookAt: then.at } };
         } else if (then.name === "greet") {
-            var who = AvatarList.getAvatar(then.who), at = who && who.position ? who.position : me.pos;
+            var who = then.who && AvatarList.getAvatar(then.who), at = who && who.position ? who.position : (ear.pos || me.pos);
             state = { name: "turn", yaw: yawTowards(at),
                       after: { name: "act", kind: "greet", duck: then.duck, start: now, until: now + 3500,
                                lookAt: Vec3.sum(at, { x: 0, y: then.duck ? 0 : 0.6, z: 0 }) } };
@@ -745,7 +864,9 @@
     function command(message) {
         try {
             var m = JSON.parse(message);
-            if (!bot || m.bot !== bot.id) return;
+            if (!bot) return;
+            if (m.act) { if (m.bot === bot.id || (!m.bot && m.near)) obey(m); return; }
+            if (m.bot !== bot.id) return;
             if (m.goto) {
                 var c = nearestCell({ x: m.goto[0], y: m.goto[1], z: m.goto[2] }, 2);
                 if (allowed(c)) { log("told to go to " + JSON.stringify(m.goto)); goTo(c, { name: "idle" }, "told to"); }
@@ -842,6 +963,7 @@
     // the avatar mixer only sends the avatars ahead of an agent, plus those within this radius all round (needs a
     // server with Agent.avatarViewRadius, 2026-10-13; older ones see only ahead)
     Agent.avatarViewRadius = VIEW_RADIUS;
+    Agent.isListeningToAudioStream = true;          // what it hears, for voice commands (Agent.takeHeardAudio)
     log("avatar view radius " + Agent.avatarViewRadius);
     Script.setTimeout(listenToBots, 4000);
     Script.setTimeout(function () {

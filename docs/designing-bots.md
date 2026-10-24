@@ -24,6 +24,8 @@
 Top level:
 - `channel` (optional): the message channel the bots share; give two crews in one domain different ones.
 - `hatch` (optional): an area where bots without a home start (otherwise anywhere open on the map).
+- `hearing` (optional): the URL of the speech service (tools/hearing.py), normally `http://127.0.0.1:40195/hear`;
+  without it bots don't take spoken commands.
 - `unit_prefix` (optional): the letters of the unit numbers stencilled on them (default DR).
 - `areas`: boxes in world coordinates (metres), `x`, `y`, `z` as `[min, max]`; `hatch` (optional) is a spot in it to
   start at.
@@ -44,6 +46,7 @@ Each bot:
 | `climbs` | `false` keeps it off stairs | true |
 | `rockets` | `true`: rocket pods, and it hops between floors at the map's rocket hops | false |
 | `home` | an area it never leaves | none |
+| `obedience` | how often it does what it's told, 0-1 | 0.7 |
 | `style` | its look (below) | |
 
 Copies of the script take bots in roster order: with three running, the first three are about.

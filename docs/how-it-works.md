@@ -91,6 +91,33 @@ has one, opens with the loudness of its own sound. Bots never speak words: they 
 Other sounds: an alert beep when a visitor arrives, a trill greeting another bot or after a roll, "oooh" peering over
 a drop, a sad note when ignored, and the rocket's whoosh. All are synthesised (`tools/make_sounds.py`).
 
+## Voice commands
+
+With a speech service running (the roster's `hearing`, see below) bots also understand a few spoken words. Each bot
+listens to what the domain's audio mixer sends it (`Agent.isListeningToAudioStream` and `Agent.takeHeardAudio`,
+Darkride's: 16-bit mono PCM at 24 kHz) and keeps the last 8 s. When a visitor pauses, the bot nearest them posts what
+it heard since they started talking to `tools/hearing.py`, which recognises it offline with Vosk against a fixed
+vocabulary (the command words and the bots' names: quick, and it can't mishear chatter as anything else) and answers
+with the words. What was said goes out on the command channel; the bot named, or with no name any bot within earshot
+of the speaker, does it:
+
+| say | it |
+|---|---|
+| sit (down) | sits for 8 to 15 s |
+| jump | jumps where it stands (a rocket bot fires its boots) |
+| roll | rolls, if there's room |
+| come (here) | comes to you |
+| follow (me) | follows you for 90 s |
+| stay, stop, wait | stays put for 45 s |
+| go away | goes somewhere at least 10 m off, sadly |
+| dance, spin | spins round |
+| hello, hi | turns to you and greets you |
+| good / bad, no | a happy trill / a sad note |
+
+Not always: each bot has an `obedience` (0 to 1, default 0.7) and otherwise refuses with a sad note, a questioning
+"hm?" or a kick. Bouncers ignore commands. Saying a name ("Pip, sit") picks that bot from anywhere it can hear you;
+without one, every bot near you may answer.
+
 ## Rockets
 
 Bots with `"rockets": true` (usually small ones that can't climb stairs) use the map's rocket hops as part of their
@@ -111,7 +138,8 @@ queued so a sequence plays in turn.
 ## Commands
 
 The message channel `<channel>.cmd` takes commands for one bot by id: `{"bot": "kip", "goto": [x, y, z]}` sends it
-there (if it can reach it). Tests use it; it's also where voice commands would come in.
+there (if it can reach it). Voice commands arrive there too, as `{"bot": "kip" or null, "act": "sit", "near": [x, y, z],
+"speaker": <session id>}`; a script of yours can send the same to make bots sit, follow and so on.
 
 ## Settings in the brain
 

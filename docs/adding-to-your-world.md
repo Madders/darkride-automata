@@ -65,6 +65,21 @@ instance per wandering bot**, and for each bot with a role (a bouncer) its own `
 - **Avatar view radius**: on Darkride, the brain sets `Agent.avatarViewRadius` so a bot sees and hears avatars all
   round it, not only ahead. Engines without it give bots a narrower view: they'll still wander, but notice less.
 
+## Voice commands (optional)
+
+For spoken commands, run the speech service on the machine the bots run on, and put its URL in the roster's
+`hearing`:
+
+```
+pip install vosk
+# the small English model (40 MB) from https://alphacephei.com/vosk/models, unzipped into .models/
+python tools/hearing.py --roster my-world/bots.json
+```
+
+It listens on 127.0.0.1:40195 (`--port`, `--host`), answers only the bots, and needs about 150 MB of memory. `--dump
+last.wav` keeps the last clip it was sent, to listen to when it mishears. It needs Darkride's agent hearing
+(`Agent.takeHeardAudio`); on other engines bots just won't take commands.
+
 ## Running the bots from another machine
 
 The bots needn't run on your domain's server: any machine with the server build can run their assignment clients and
