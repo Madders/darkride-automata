@@ -1,0 +1,20 @@
+{
+  "about": "An example crew: the bots of Madders Place, whose areas are in its coordinates (set yours: docs/designing-bots.md). Each running copy of duck-brain.js takes the first bot here that isn't already about, so with N copies the first N are out. size: scale against the standard duck (stairs and gait follow it). climbs: false keeps a bot off stairs (it stays on the level it hatches on, unless it has rockets: true, which hops it up and down at the rocket hops). home: an area from 'areas' it never leaves. shell, accent: colours 0-1; glow: how much the accent lights up. wear: 0 factory-fresh to 1 beaten up. style: its look (head loaf, dome or wedge; eyes lens, visor or twin; antennas 0-2; fins; crest; chest light). build_bots.py builds each bot's model from this.",
+  "hatch": "ground",
+  "areas": {
+    "office": {"x": [-24.5, -5.0], "y": [2.5, 6.5], "z": [-44.5, -31.5], "hatch": [-13.1, 3.6, -38.9]},
+    "ground": {"x": [-40, 40], "y": [-3.0, -1.5], "z": [-60, 20]}
+  },
+  "bots": [
+    {"id": "bolt", "name": "Bolt", "size": 1.0, "shell": [0.86, 0.88, 0.92], "accent": [0.0, 0.85, 1.0], "glow": 0.8, "metal": 0.5, "wear": 0.25, "style": {"jaw": true, "head": "loaf", "eyes": "lens", "antennas": 1}},
+    {"id": "pip", "name": "Pip", "size": 0.55, "shell": [1.0, 0.45, 0.08], "accent": [0.1, 0.95, 1.0], "glow": 1.0, "metal": 0.2, "climbs": false, "rockets": true, "wear": 0.5, "style": {"jaw": true, "head": "dome", "eyes": "twin", "antennas": 2}},
+    {"id": "juno", "name": "Juno", "size": 0.85, "shell": [0.09, 0.09, 0.11], "accent": [1.0, 0.1, 0.75], "glow": 1.0, "metal": 0.7, "home": "office", "wear": 0.2, "style": {"head": "wedge", "eyes": "visor", "antennas": 0, "crest": true}},
+    {"id": "rook", "name": "Rook", "size": 1.35, "shell": [0.32, 0.34, 0.38], "accent": [1.0, 0.12, 0.08], "glow": 0.9, "metal": 0.8, "wear": 0.85, "style": {"head": "wedge", "eyes": "visor", "antennas": 2, "fins": true}},
+    {"id": "nyx", "name": "Nyx", "size": 0.8, "shell": [0.36, 0.16, 0.6], "accent": [0.55, 1.0, 0.1], "glow": 0.9, "metal": 0.4, "wear": 0.35, "style": {"head": "dome", "eyes": "lens", "antennas": 0, "crest": true}},
+    {"id": "kip", "name": "Kip", "size": 0.65, "shell": [1.0, 0.85, 0.12], "accent": [0.1, 0.35, 1.0], "glow": 0.7, "metal": 0.2, "climbs": false, "rockets": true, "wear": 0.6, "style": {"jaw": true, "head": "loaf", "eyes": "twin", "antennas": 1}},
+    {"id": "vex", "name": "Vex", "size": 1.1, "shell": [0.05, 0.45, 0.48], "accent": [1.0, 0.55, 0.0], "glow": 0.9, "metal": 0.6, "wear": 0.5, "style": {"head": "wedge", "eyes": "lens", "antennas": 1, "fins": true}},
+    {"id": "moss", "name": "Moss", "size": 0.95, "shell": [0.36, 0.42, 0.2], "accent": [1.0, 0.75, 0.15], "glow": 0.6, "metal": 0.3, "home": "ground", "wear": 0.9, "style": {"jaw": true, "head": "loaf", "eyes": "visor", "antennas": 0}},
+    {"id": "echo", "name": "Echo", "size": 0.75, "shell": [0.95, 0.95, 0.97], "accent": [0.7, 0.3, 1.0], "glow": 1.0, "metal": 0.3, "wear": 0.05, "style": {"jaw": true, "head": "dome", "eyes": "visor", "antennas": 2}},
+    {"id": "tank", "name": "Tank", "size": 1.5, "shell": [0.14, 0.15, 0.13], "accent": [0.2, 1.0, 0.35], "glow": 0.8, "metal": 0.9, "wear": 0.95, "style": {"head": "wedge", "eyes": "twin", "antennas": 0, "fins": true, "crest": true}}
+  ]
+}

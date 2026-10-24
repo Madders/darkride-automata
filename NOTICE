@@ -1,0 +1,17 @@
+darkride-bots
+Copyright 2026 Martin Allerton
+
+This kit includes material derived from Pollen Robotics' Microduck (https://github.com/pollen-robotics/microduck_rl
+and https://huggingface.co/spaces/pollen-robotics/microduck-simulator), licensed under the Apache License 2.0:
+
+- tools/skeleton.json: the robot's skeleton (bones, their placement and bind pose), from its MJCF robot description,
+  scaled four times.
+- bot/duck-cycles.json: walk, turn and idle cycles and one-shot moves (sit, roll, peck, kicks), recorded by running
+  Pollen's trained policies in MuJoCo, with the joint data from the MJCF (base rotations, limits, default pose).
+- motions/record_walk.py, make_cycles.py, record_moves.py: run Pollen's policies the way their simulator does.
+
+Copyright Pollen Robotics. Licensed under the Apache License, Version 2.0.
+
+Pollen's 3D meshes (CC BY-NC-SA 4.0) are not included: the bots' models are built by tools/build_bots.py. If you use
+motions/build_duck.py, it reads those meshes from Pollen's repository, and the reference model it makes is an
+adaptation of them, under CC BY-NC-SA 4.0 (credit Pollen Robotics, non-commercial, share alike).

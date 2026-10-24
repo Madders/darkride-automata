@@ -1,0 +1,11 @@
+# the tools: building bots, the map, sounds
+numpy
+scipy
+pillow
+trimesh
+embreex      # fast ray casting for the map
+shapely      # trimesh's mesh slicing (the bots' head bands)
+networkx     # trimesh's normal fixing
+# motions/ only: recording from Pollen's policies
+mujoco
+onnxruntime

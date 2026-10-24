@@ -1,0 +1,17 @@
+{
+  "about": "An example world config for tools/build_nav.py (docs/adding-to-your-world.md). Paths are relative to this file.",
+  "entities": "my-world/models.json.gz",
+  "assets": {"https://my-asset-server.example/": "my-world/assets/"},
+  "download": true,
+  "fbx2gltf": "",
+  "cache": ".navcache",
+  "region": {"x": [-30, 30], "y": [-5, 20], "z": [-30, 30]},
+  "skip": ["sky_", "backdrop_"],
+  "bot": {"cell": 0.25, "headroom": 1.15, "step": 0.32, "drop": 0.6},
+  "pois": [
+    {"kind": "screen", "type": "Web"},
+    {"kind": "art", "match": ["Painting", "Poster"]},
+    {"kind": "statue", "match": ["Statue"]}
+  ],
+  "out": "nav.json"
+}
