@@ -102,7 +102,8 @@ def local_file(url):
     """Where a model is on disk: under a local folder its URL prefix maps to, or downloaded into the cache."""
     for prefix, folder in CONFIG["_assets"].items():
         if url.startswith(prefix):
-            return folder / urllib.parse.unquote(url[len(prefix):]).lstrip("/")
+            # without any query or fragment (a "?v=2" to make viewers fetch a model afresh names the same file)
+            return folder / urllib.parse.unquote(url[len(prefix):].split("?")[0].split("#")[0]).lstrip("/")
     if url.startswith(("http://", "https://")) and CONFIG.get("download", True):
         name = urllib.parse.unquote(urllib.parse.urlsplit(url).path).rsplit("/", 1)[-1]
         target = CACHE / "download" / (hashlib.sha1(url.encode()).hexdigest()[:10] + "-" + name)
