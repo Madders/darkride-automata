@@ -9,7 +9,7 @@ envelopes, in a few moods:
 - sad: a low falling note, for being ignored;
 - alert: two quick beeps, for something new;
 - rocket: the rocket feet's whoosh, for a hop;
-- servo, clank, countdown: a big bot's actuators, heavy feet and countdown beeps.
+- servo, clank, countdown: a big bot's hydraulics, heavy feet and countdown beeps.
 Written as 16-bit mono WAV at 24 kHz to bot/sounds/. Usage: python make_sounds.py
 """
 import math
@@ -94,15 +94,20 @@ def rocket(rng, seconds=1.1):
     return (out / np.abs(out).max() + rumble + whine) * shape
 
 
-def servo(rng, seconds=0.9):
-    """A big actuator moving: a geared whine rising and falling over a low hum, with a hiss of hydraulics."""
+def servo(rng, seconds=1.0):
+    """A big hydraulic actuator: a low motor rumble swelling and fading, and the hiss of fluid moving, no tone to it
+    (a geared whine read as beeping on a big bot)."""
     t = np.arange(int(seconds * RATE)) / RATE
-    shape = np.sin(np.pi * t / seconds) ** 0.6
-    whine = np.sin(2 * np.pi * np.cumsum(220 + 160 * shape) / RATE)
-    whine = np.sign(whine) * np.abs(whine) ** 0.4 * 0.3                          # gear teeth
-    hum = np.sin(2 * np.pi * 60 * t) * 0.3
-    hiss = rng.normal(0, 1, len(t)) * 0.15 * np.exp(-((t - seconds * 0.85) / 0.08) ** 2)
-    return (whine + hum) * shape + hiss
+    shape = np.sin(np.pi * np.clip(t / seconds, 0, 1)) ** 0.8
+    rumble = np.sin(2 * np.pi * np.cumsum(38 + 10 * shape) / RATE) + 0.5 * np.sin(2 * np.pi * np.cumsum(76 + 20 * shape) / RATE)
+    rumble *= 1 + 0.3 * rng.normal(0, 1, len(t))                                # rough, not pure
+    noise = rng.normal(0, 1, len(t))
+    a, y, hiss = np.exp(-2 * np.pi * 900 / RATE), 0.0, np.empty_like(noise)   # a soft, dark hiss
+    for i, v in enumerate(noise):
+        y = (1 - a) * v + a * y
+        hiss[i] = y
+    hiss /= np.abs(hiss).max()
+    return (0.5 * rumble + 0.6 * hiss) * shape
 
 
 def clank(rng, seconds=0.6):

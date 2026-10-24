@@ -346,7 +346,7 @@
         var now = Date.now(), near = others();
         near.forEach(function (o) {
             if (dist(o.pos, me.pos) < LOOK_RANGE) {
-                if (!visitorSince[o.id]) { visitorSince[o.id] = now; if (!o.duck) say("alert", 0.4); }
+                if (!visitorSince[o.id]) { visitorSince[o.id] = now; if (!o.duck && !bot.role) say("alert", 0.4); }
             } else delete visitorSince[o.id];
         });
         // whoever's closest within range gets watched, unless we're busy peering
@@ -388,7 +388,7 @@
     }
     function guardTick(dt, now, near) {
         var g = guard = guard || { post: me.yaw, lastSeen: 0, nextShift: now + rnd(8000, 15000), nextMutter: now + 60000,
-                                   challenged: {}, shifting: 0 };
+                                   challenged: {}, shifting: 0, nextTurn: 0 };
         // who's about: the nearest visitor is watched; anyone arriving is challenged (or welcomed)
         var watched = null, best = GUARD_RANGE;
         near.forEach(function (o) {
@@ -413,7 +413,9 @@
             setCycle("idle");
             var want = g.post;
             if (watched) want = g.post + clamp(wrap(yawTowards(watched.pos) - g.post), -1.3, 1.3);
-            if (watched ? Math.abs(wrap(want - me.yaw)) > 0.8 : now - g.lastSeen > 12000 && Math.abs(wrap(g.post - me.yaw)) > 0.1) {
+            if (now > g.nextTurn &&
+                (watched ? Math.abs(wrap(want - me.yaw)) > 0.9 : now - g.lastSeen > 12000 && Math.abs(wrap(g.post - me.yaw)) > 0.1)) {
+                g.nextTurn = now + 5000;                 // a big machine doesn't fidget: one turn, then a pause
                 say("servo");
                 state = { name: "turn", yaw: watched ? want : g.post, after: { name: "guard" } };
             } else if (now > g.nextShift) {
@@ -515,7 +517,10 @@
         if (Math.abs(err) < 0.12) { state = after; return; }
         me.yaw = wrap(me.yaw + clamp(err, -TURN_RATE / GAIT * dt, TURN_RATE / GAIT * dt));
         setCycle(err > 0 ? "turn_left" : "turn_right", 2);
-        if (bot.role === "bouncer" && Math.random() < dt / 1.2) say("clank");
+        if (bot.role === "bouncer") {                // a heavy foot coming down every step or so
+            state.stepAt = (state.stepAt || 0) + dt;
+            if (state.stepAt > 1.3 * GAIT / 1.7) { state.stepAt = 0; say("clank"); }
+        }
     }
 
     function arrive(then) {
