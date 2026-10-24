@@ -133,7 +133,7 @@ Two more bodies, both plain machines without neon (keep their `glow` low: it onl
 - `"build": "astromech"`: an R-series astromech: a barrel body on two side legs and a middle one, its domed head on
   the head's swivel joint, so the dome turns to look at people and things while the body stays put. Silver dome, its
   `paint2` on the dome and body panels (blue for an R2 look, red for an R5), a radar eye, a holo-projector and two
-  dim logic panels in its accent. It glides rather than walks, whistles and warbles, screams when startled, and spins
+  dim logic panels in its accent. It glides rather than walks, its body tilting back between its upright legs as it drives (as R2's does), whistles and warbles, screams when startled, and spins
   its dome or rocks instead of sitting or rolling. Astromechs can't climb stairs; give one `"rockets": true` to boost
   up to other floors at the map's rocket hops, as R2 does.
 

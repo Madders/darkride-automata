@@ -534,50 +534,56 @@ ASTRO_AXIS = [0, -0.036]        # the astromech's body and dome share the head's
 def design_astromech(sk, style):
     """An astromech (the R-series sort): a barrel of a body on two side legs with a third in the middle, a domed head
     that swivels (on head_yaw) to look about. No neon: a radar eye, a holo-projector, two small logic panels, and
-    its second paint on the dome and body panels. The body and legs ride on Hips, the dome on head_yaw; the duck's
-    legs are hidden inside (the brain glides it along and keeps its neck still)."""
+    its second paint on the dome and body panels. As R2 does when it drives, the body tilts back between its legs on
+    its shoulders while the side legs stay upright, feet flat: so the body (and its middle leg) rides on neck_pitch,
+    whose joint is where the shoulders are, turning about the same sideways axis, and the side legs ride on Hips.
+    The dome is on head_yaw, above them. The duck's own legs are hidden inside (the brain glides it along)."""
     parts = []
 
     def add(mesh, material, bone="Hips", smooth=True):
         parts.append((mesh, material, bone, smooth))
 
+    def body(mesh, material, smooth=True):
+        add(mesh, material, "neck_pitch", smooth)
+
     cx, cz = ASTRO_AXIS
     top = sk.pos("head_yaw")[1] - 0.012                                  # the body's top, just under the dome
     r, y0 = 0.2, FLOOR + 0.2
-    add(cylinder([cx, (top + y0) / 2, cz], [0, 1, 0], r, top - y0, 48), "shell")
-    add(cylinder([cx, y0 - 0.03, cz], [0, 1, 0], r * 0.82, 0.06), "dark", smooth=False)            # the lower skirt
-    add(cylinder([cx, top - 0.005, cz], [0, 1, 0], r + 0.004, 0.012), "metal", smooth=False)       # the dome ring
+    pivot = sk.pos("neck_pitch")                                         # the shoulders: the body tilts about here
+    sy, lz = pivot[1], pivot[2]
+    body(cylinder([cx, (top + y0) / 2, cz], [0, 1, 0], r, top - y0, 48), "shell")
+    body(cylinder([cx, y0 - 0.03, cz], [0, 1, 0], r * 0.82, 0.06), "dark", False)                 # the lower skirt
+    body(cylinder([cx, top - 0.005, cz], [0, 1, 0], r + 0.004, 0.012), "metal", False)            # the dome ring
     # panels on the body, in its second paint: two tall ones in front, a band, side panels
     fz = cz - r - 0.004
     for x0, x1 in ((-0.13, -0.05), (0.05, 0.13)):
-        add(box([x0, y0 + 0.12, fz - 0.006], [x1, top - 0.08, fz + 0.03]), "trim", smooth=False)
-    add(box([-0.04, top - 0.12, fz - 0.006], [0.04, top - 0.07, fz + 0.03]), "dark", smooth=False)  # a vent
+        body(box([x0, y0 + 0.12, fz - 0.006], [x1, top - 0.08, fz + 0.03]), "trim", False)
+    body(box([-0.04, top - 0.12, fz - 0.006], [0.04, top - 0.07, fz + 0.03]), "dark", False)       # a vent
     for y in (y0 + 0.05, y0 + 0.08):                                     # coin-slot vents low down
-        add(box([-0.035, y - 0.006, fz - 0.008], [0.035, y + 0.006, fz + 0.03]), "dark", smooth=False)
-    add(box([-0.17, top - 0.05, cz - 0.1], [0.17, top - 0.035, cz + 0.1]), "trim", smooth=False)
+        body(box([-0.035, y - 0.006, fz - 0.008], [0.035, y + 0.006, fz + 0.03]), "dark", False)
+    body(box([-0.17, top - 0.05, cz - 0.1], [0.17, top - 0.035, cz + 0.1]), "trim", False)
     for sx in (-1, 1):
-        add(box([sx * (r - 0.02) - 0.02, y0 + 0.15, cz - 0.06], [sx * (r - 0.02) + 0.02, top - 0.1, cz + 0.06]), "trim", smooth=False)
-    # the side legs: a shoulder hub, a broad strut down to a big foot, angled back a touch; the third leg in the middle
-    sy = top - 0.13
+        body(box([sx * (r - 0.02) - 0.02, y0 + 0.05, cz - 0.06], [sx * (r - 0.02) + 0.02, sy - 0.08, cz + 0.06]), "trim", False)
+        body(cylinder([sx * (r + 0.005), sy, lz], [1, 0, 0], 0.075, 0.03), "dark", False)        # the shoulder socket
+    # the middle leg: a short strut tucked under the skirt, standing upright on the floor (on Hips), so as the body
+    # tilts back over it, it shows below, planted, as R2's third leg is when it drives
+    add(rounded_box([cx - 0.035, FLOOR + 0.04, cz - 0.04], [cx + 0.035, y0 - 0.02, cz + 0.03], 0.015), "metal")
+    add(rounded_box([cx - 0.05, FLOOR, cz - 0.08], [cx + 0.05, FLOOR + 0.05, cz + 0.06], 0.015), "dark")
+    # the side legs: a shoulder hub on the pivot, a broad strut straight down to a big foot (they stay upright)
     for sx in (-1, 1):
         x = sx * (r + 0.045)
-        add(cylinder([sx * (r + 0.01), sy, cz], [1, 0, 0], 0.07, 0.05), "metal", smooth=False)
-        add(cylinder([sx * (r + 0.035), sy, cz], [1, 0, 0], 0.045, 0.02), "trim", smooth=False)
-        strut = rounded_box([x - 0.03, FLOOR + 0.1, cz - 0.045], [x + 0.03, sy + 0.04, cz + 0.045], 0.02)
-        add(strut, "shell")
-        add(box([x - 0.032, FLOOR + 0.2, cz - 0.02], [x + 0.032, sy - 0.05, cz + 0.02]), "trim", smooth=False)
-        # the foot rides on the duck's ankle (right by it), which the brain keeps level while the body and struts
-        # lean as it drives: so the leg pivots at the ankle and the wheels stay flat on the floor
-        ankle = ("left" if sx < 0 else "right") + "_ankle"
-        add(rounded_box([x - 0.05, FLOOR, cz - 0.13], [x + 0.05, FLOOR + 0.12, cz + 0.09], 0.025), "shell", ankle)
-        add(rounded_box([x - 0.045, FLOOR - 0.003, cz - 0.12], [x + 0.045, FLOOR + 0.02, cz + 0.08], 0.008), "dark", ankle)
-        add(cylinder([x, FLOOR + 0.1, cz - 0.02], [1, 0, 0], 0.035, 0.11), "metal", ankle, False)   # the ankle hinge
+        add(cylinder([sx * (r + 0.025), sy, lz], [1, 0, 0], 0.065, 0.04), "metal", smooth=False)
+        add(cylinder([sx * (r + 0.048), sy, lz], [1, 0, 0], 0.04, 0.012), "trim", smooth=False)
+        add(cylinder([sx * (r + 0.056), sy, lz], [1, 0, 0], 0.014, 0.012), "dark", smooth=False)
+        add(rounded_box([x - 0.03, FLOOR + 0.1, lz - 0.045], [x + 0.03, sy + 0.05, lz + 0.045], 0.02), "shell")
+        add(box([x - 0.032, FLOOR + 0.2, lz - 0.02], [x + 0.032, sy - 0.08, lz + 0.02]), "trim", smooth=False)
+        add(rounded_box([x - 0.05, FLOOR, lz - 0.13], [x + 0.05, FLOOR + 0.12, lz + 0.09], 0.025), "shell")
+        add(rounded_box([x - 0.045, FLOOR - 0.003, lz - 0.12], [x + 0.045, FLOOR + 0.02, lz + 0.08], 0.008), "dark")
+        add(cylinder([x, FLOOR + 0.1, lz - 0.02], [1, 0, 0], 0.035, 0.11), "metal", smooth=False)   # the ankle
         if style.get("rockets"):                                         # booster pods on the outside of each leg
-            c = np.array([x + sx * 0.045, FLOOR + 0.32, cz + 0.02])
+            c = np.array([x + sx * 0.045, FLOOR + 0.32, lz + 0.02])
             add(capsule(c + [0, 0.1, 0], c, 0.026), "metal")
             add(disc(c + [0, -0.02, 0], [0, 1, 0], 0.03, 0.03), "dark", smooth=False)
-    add(rounded_box([cx - 0.035, FLOOR + 0.04, cz - 0.05], [cx + 0.035, y0, cz + 0.04], 0.015), "metal")      # middle leg
-    add(rounded_box([cx - 0.05, FLOOR, cz - 0.08], [cx + 0.05, FLOOR + 0.05, cz + 0.06], 0.015), "dark")
     # the dome: silver, panels in its second paint, a radar eye, a holo-projector, two little logic panels
     hy = sk.pos("head_yaw")
     centre = np.array([cx, hy[1], cz])

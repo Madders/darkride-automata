@@ -47,8 +47,8 @@
 //  sixpence, pauses to chatter at walls and corners, never sits or rolls, and bolts with a squeal from any stranger who
 //  comes near (it's shy whatever its personality says, unless they're an old friend).
 //
-//  An astromech ("build": "astromech", an R-unit sort): it glides along on its feet's wheels (no walk cycle), leaning
-//  back on its legs as it drives (body and legs pivot at the ankles, its feet staying flat on the floor), keeps its neck still and turns its whole dome to look at things, whistles and warbles, screams when
+//  An astromech ("build": "astromech", an R-unit sort): it glides along on its feet's wheels (no walk cycle), its body
+//  tilting back between its upright legs as it drives (on its shoulders: neck_pitch), keeps the rest of its neck still and turns its whole dome to look at things, whistles and warbles, screams when
 //  startled, and instead of sitting or rolling spins its dome or rocks on the spot.
 //  A power droid ("build": "power", a gonk): it waddles slowly on its stubby legs, honks, and never rolls.
 //
@@ -93,7 +93,7 @@
     var following = null, stayUntil = 0, tour = null, guide = null;
     var mind = { energy: 0.5, curiosity: 0.5, shyness: 0.5, chattiness: 0.5, sociability: 0.5 };
     var memory = { visitors: {}, bots: {} }, memoryDirty = false, memorySavedAt = 0, PACE = 1, MOUSE = false, ASTRO = false, POWER = false;
-    var lean = 0, LEAN_DRIVE = 0.24, ANKLE_Y = -0.38;    // an astromech's lean back as it drives (rad); its ankles' height
+    var lean = 0, LEAN_DRIVE = 0.3;                      // an astromech's body tilting back as it drives (rad)
     var roster = null, bot = null, SIZE = 1, GAIT = 1, area = null;
 
     function log(t) { print("duck " + (Agent.sessionUUID || "").substr(1, 4) + ": " + t); }
@@ -1057,21 +1057,17 @@
     var HALF_TURN = { x: 0, y: 1, z: 0, w: 0 };
     function applyRow(row, k0) {
         var abs = { Hips: Quat.multiply(HALF_TURN, { x: row[k0], y: row[k0 + 1], z: row[k0 + 2], w: row[k0 + 3] }) };
-        var level = ASTRO ? { Hips: HALF_TURN } : null;            // (the same chain without the lean)
-        if (ASTRO) abs.Hips = Quat.multiply(HALF_TURN, Quat.angleAxis(lean * 180 / Math.PI, Vec3.UNIT_X));
+        if (ASTRO) abs.Hips = HALF_TURN;                            // its legs stand still, upright
         rotations[order[0]] = abs.Hips;
         for (var j = 0; j < cyc.joints.length; j++) {
             var name = cyc.joints[j], k = k0 + 4 + j * 4;
             var q = { x: row[k], y: row[k + 1], z: row[k + 2], w: row[k + 3] };
             var extra = look.weight > 0.01 || ASTRO ? headAngle(name) : null;
-            if (ASTRO && extra !== null) q = jointQuat(name, cyc.rest[name] + (name === "head_yaw" ? extra * look.weight : 0));
+            if (ASTRO && extra !== null) q = jointQuat(name, cyc.rest[name] + (name === "head_yaw" ? extra * look.weight :
+                                                                              name === "neck_pitch" ? lean : 0));
             else if (ASTRO) q = jointQuat(name, cyc.rest[name]);       // legs at rest: they're rigid struts
             else if (extra !== null) q = Quat.slerp(q, jointQuat(name, cyc.rest[name] + extra), look.weight);
             abs[name] = Quat.multiply(abs[cyc.parents[name]], q);
-            if (level) {
-                level[name] = Quat.multiply(level[cyc.parents[name]], q);
-                if (/_ankle$/.test(name)) abs[name] = level[name];       // the feet stay flat on the floor
-            }
             rotations[order[j + 1]] = abs[name];
         }
         for (var e = 0; e < extraJoints.length; e++) rotations[extraJoints[e]] = HALF_TURN;
@@ -1097,13 +1093,7 @@
         var frame = c.frames[Math.floor(cycleTime * cyc.fps) % c.frames.length];
         Avatar.position = { x: me.pos.x, y: me.pos.y + (cyc.trunkHeight + frame[0]) * SIZE, z: me.pos.z };
         Avatar.orientation = yawQuat(me.yaw);
-        if (ASTRO) {
-            // lean back while driving, easing in and out; the body turns about its hips, so shift it to keep the line
-            // through its ankles still (the pivot), and the feet (on the ankles) are held level in applyRow
-            lean += ((state.name === "walk" ? LEAN_DRIVE : 0) - lean) * Math.min(1, dt * 2.5);
-            var keep = { x: 0, y: ANKLE_Y * (1 - Math.cos(lean)) * SIZE, z: -ANKLE_Y * Math.sin(lean) * SIZE };
-            Avatar.position = Vec3.sum(Avatar.position, Vec3.multiplyQbyV(Avatar.orientation, keep));
-        }
+        if (ASTRO) lean += ((state.name === "walk" ? LEAN_DRIVE : 0) - lean) * Math.min(1, dt * 2.5);   // eased in and out
         if (order) applyRow(frame, 1);
     }
     // the avatar's joint order: the .fst's jointIndex list, which matches the skeleton a viewer builds (ROOT, the duck's

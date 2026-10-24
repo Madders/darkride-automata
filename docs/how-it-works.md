@@ -144,7 +144,7 @@ pace (its hidden legs' walk cycle sped up with it, so it jiggles), turns four ti
 chirping, prefers walls to edges, never sits or rolls, and is always shy.
 
 An astromech (`"build": "astromech"`) holds its neck still and turns only its dome (head_yaw) to look about, glides on
-the idle cycle instead of stepping, turns twice as fast, whistles, and spins its dome where another bot would sit or
+the idle cycle instead of stepping (its body, on neck_pitch at the shoulders, tilting back between its upright legs), turns twice as fast, whistles, and spins its dome where another bot would sit or
 roll. A power droid (`"build": "power"`) plods at about half pace on its walk cycle, honks, and never rolls.
 
 ## Rockets
