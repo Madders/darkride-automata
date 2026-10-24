@@ -11,6 +11,11 @@ many styles as you like, weathered like Star Wars droids from factory-fresh to b
 
 ![Bots in Madders Place](examples/bots-in-world.jpg)
 
+And a **bouncer**: a big armoured sentry (ED-209 crossed with an ABC Warrior) that guards the door, watches people
+arrive, swivels its guns to follow them and challenges strangers in a slow, canned machine voice.
+
+![The bouncer by the door](examples/bouncer-in-world.jpg)
+
 ## What you get
 
 - **The runtime** (`bot/`): the script your domain runs for each bot (`duck-bot.js` loading `duck-brain.js`), the
@@ -20,6 +25,7 @@ many styles as you like, weathered like Star Wars droids from factory-fresh to b
 - **A map builder** (`tools/build_nav.py`): makes the bots' walkable map of your world from its entities: floors on
   every level, stairs, walls, drops, rocket hops and things worth looking at.
 - **A packager** (`tools/package.py`): builds the folder of files to upload to your asset server.
+- **A voice maker** (`tools/make_voice.py`, Windows): speaking bots' lines, made into a machine's voice.
 - **The motion recorder** (`motions/`): if you want to record new moves from Pollen's policies.
 - **Tests** (`tests/`): Interface scripts that photograph the bots, check their joints, make them talk and hop.
 

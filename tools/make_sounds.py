@@ -8,7 +8,8 @@ envelopes, in a few moods:
 - ooh: a falling, wobbly "oooh", for peering over an edge;
 - sad: a low falling note, for being ignored;
 - alert: two quick beeps, for something new;
-- rocket: the rocket feet's whoosh, for a hop.
+- rocket: the rocket feet's whoosh, for a hop;
+- servo, clank, countdown: a big bot's actuators, heavy feet and countdown beeps.
 Written as 16-bit mono WAV at 24 kHz to bot/sounds/. Usage: python make_sounds.py
 """
 import math
@@ -93,6 +94,27 @@ def rocket(rng, seconds=1.1):
     return (out / np.abs(out).max() + rumble + whine) * shape
 
 
+def servo(rng, seconds=0.9):
+    """A big actuator moving: a geared whine rising and falling over a low hum, with a hiss of hydraulics."""
+    t = np.arange(int(seconds * RATE)) / RATE
+    shape = np.sin(np.pi * t / seconds) ** 0.6
+    whine = np.sin(2 * np.pi * np.cumsum(220 + 160 * shape) / RATE)
+    whine = np.sign(whine) * np.abs(whine) ** 0.4 * 0.3                          # gear teeth
+    hum = np.sin(2 * np.pi * 60 * t) * 0.3
+    hiss = rng.normal(0, 1, len(t)) * 0.15 * np.exp(-((t - seconds * 0.85) / 0.08) ** 2)
+    return (whine + hum) * shape + hiss
+
+
+def clank(rng, seconds=0.6):
+    """A heavy metal foot coming down: a thud, a ring of steel, a rattle."""
+    t = np.arange(int(seconds * RATE)) / RATE
+    thud = np.sin(2 * np.pi * 55 * t) * np.exp(-t / 0.06)
+    ring = sum(np.sin(2 * np.pi * f * t) * np.exp(-t / d) * a
+               for f, d, a in ((310, 0.18, 0.3), (517, 0.12, 0.2), (1130, 0.07, 0.12)))
+    rattle = rng.normal(0, 1, len(t)) * np.exp(-t / 0.03) * 0.4
+    return thud + ring + rattle
+
+
 def glide(a, b, curve=1.0):
     return lambda t: a + (b - a) * (t / t[-1]) ** curve if len(t) else a
 
@@ -111,6 +133,9 @@ def main():
     save("alert", envelope(join(tone(lambda t: 1250 + 0 * t, 0.07, brightness=0.8),
                                 tone(lambda t: 1250 + 0 * t, 0.07, brightness=0.8), gap=0.06)))
     save("rocket", rocket(rng))
+    save("servo", servo(rng))
+    save("clank", clank(rng))
+    save("countdown", envelope(join(*[tone(lambda t: 880 + 0 * t, 0.09, brightness=0.9) for _ in range(5)], gap=0.4)))
     print("wrote", sorted(p.name for p in OUT.iterdir()))
 
 

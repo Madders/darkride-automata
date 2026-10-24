@@ -98,6 +98,16 @@ routes: they face the hop, crouch, light up (a whoosh, a particle-effect flame t
 edge or down off it, and land in a puff of smoke. The flame is a domain entity the bot creates and moves, so the
 domain must let the agent create entities (see docs/adding-to-your-world.md).
 
+## Bouncers
+
+A bot with `"role": "bouncer"` stands guard instead of wandering (docs/designing-bots.md): it runs from its own loader
+(`bot-<id>.js` sets `BOT_ID` and includes the brain), so the wandering copies leave it alone. At its post it watches
+the nearest visitor within 15 m with its hull, turns its whole body (servo whirrs, clanking feet) to face anyone more
+than about 45° off, and back to its post when they've gone; challenges every visitor who comes within 12 m (once in
+ten minutes each) with one of its canned sequences, or welcomes them if it recognises their name; answers anyone who
+talks to it; and now and then shifts its weight or mutters to itself. Its lines are spoken sounds (make_voice.py),
+queued so a sequence plays in turn.
+
 ## Commands
 
 The message channel `<channel>.cmd` takes commands for one bot by id: `{"bot": "kip", "goto": [x, y, z]}` sends it

@@ -16,6 +16,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import build_bots as bb  # noqa: E402
 
 S = 300
+ZOOM = 0.8
 
 
 def colour(bot, material):
@@ -42,7 +43,7 @@ def view(parts, bot, yaw):
     im = Image.new("RGB", (S, S), (28, 26, 40))
     d = ImageDraw.Draw(im)
     for t, c in zip(tris[np.argsort(-tris[:, :, 2].mean(1))], cols[np.argsort(-tris[:, :, 2].mean(1))]):
-        d.polygon([((p[0] * 0.8 + 0.5) * S, (0.55 - p[1] * 0.8) * S) for p in t],
+        d.polygon([((p[0] * ZOOM + 0.5) * S, (0.55 - p[1] * ZOOM) * S) for p in t],
                   fill=tuple(int(255 * min(1, x)) for x in c))
     d.text((8, 6), bot["name"], fill=(220, 220, 230))
     return im

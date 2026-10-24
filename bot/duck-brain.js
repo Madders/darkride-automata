@@ -25,6 +25,11 @@
 //  area it keeps to, and rockets in its feet for some (hopping up to and down from upper floors at the rocket hops).
 //  A scripted avatar without an account has no display name: its looks tell it apart.
 //
+//  A bot with "role": "bouncer" (bots.json) runs from its own loader (bot-<id>.js, which sets BOT_ID) and guards a
+//  post instead of wandering: it watches everyone within GUARD_RANGE, swivels to follow them and turns to face anyone
+//  well off to the side, challenges arrivals with its canned lines ("lines" in the roster: a welcome for names it
+//  recognises, a challenge for the rest), answers anyone who talks to it, shifts its feet now and then and mutters.
+//
 (function () {
     var BASE = Script.resolvePath(".").replace(/[^\/]*$/, "");
     var SPEEDUP = 1.5;              // the policy's walk is a slow amble at this size
@@ -50,6 +55,7 @@
     var ear = { who: null, pos: null, heardAt: 0, talk: 0, replied: true, replyAt: 0, tilt: 0, tiltAt: 0, nodUntil: 0,
                 boredUntil: 0, loudest: 0 };
     var visitorSince = {}, greetedAt = {}, lastTick = 0, lastSaid = 0, hopsOf = {}, flame = null;
+    var GUARD_RANGE = 15, ARRIVE_RANGE = 12, guard = null, speech = [];
     var roster = null, bot = null, SIZE = 1, GAIT = 1, area = null;
 
     function log(t) { print("duck " + (Agent.sessionUUID || "").substr(1, 4) + ": " + t); }
@@ -65,11 +71,22 @@
     function say(name, chance) {
         if (chance !== undefined && Math.random() > chance) return false;
         if (name === "chirp") name = "chirp_" + (1 + Math.floor(Math.random() * 8));
+        if (!sounds[name]) sounds[name] = SoundCache.getSound(BASE + "sounds/" + name + ".wav");   // a bot's own lines
         var s = sounds[name];
         if (!s || !s.downloaded || Agent.isPlayingAvatarSound || Date.now() - lastSaid < 600) return false;
         Agent.playAvatarSound(s);
         lastSaid = Date.now();
         return true;
+    }
+
+    // a sequence of lines, said one after another with a pause between (the bouncer's challenges)
+    function sayInTurn(names) { speech = speech.concat(names); }
+    function speak(now) {
+        if (speech.length && !Agent.isPlayingAvatarSound && now - lastSaid > 900 && say(speech[0])) speech.shift();
+    }
+    function line(kind) {                          // one of the bot's lines of a kind, or a sequence of them
+        var l = bot.lines && bot.lines[kind];
+        return l && l.length ? pick(l) : null;
     }
 
     // ── the map ─────────────────────────────────────────────────────────────
@@ -310,7 +327,8 @@
             near.forEach(function (o) { if (o.id === ear.who) ear.pos = Vec3.sum(o.pos, { x: 0, y: 0.6, z: 0 }); });
             if (!ear.replied && now > ear.replyAt && ear.talk > 0.35) {
                 ear.replied = true;
-                say(ear.talk > 2.5 && Math.random() < 0.5 ? "question" : "chirp");
+                if (bot.role === "bouncer") { var r = line("reply"); if (r) sayInTurn([r]); }
+                else say(ear.talk > 2.5 && Math.random() < 0.5 ? "question" : "chirp");
                 ear.nodUntil = now + 900;
                 ear.talk = 0;
             }
@@ -338,6 +356,8 @@
             if (d < best) { best = d; watch = Vec3.sum(o.pos, { x: 0, y: o.duck ? 0 : 0.6, z: 0 }); }
         });
         hear(near, dt, now);
+        speak(now);
+        if (bot.role === "bouncer") { guardTick(dt, now, near); return; }
 
         // someone talking to us: stop what we're doing (unless mid-move or peering over a drop) and face them
         if (listening(now) && now - ear.heardAt < 500 && now > ear.boredUntil &&
@@ -359,6 +379,55 @@
         var lookAt = listening(now) ? ear.pos : state.name === "act" && state.lookAt ? state.lookAt : watch;
         if (state.name === "move" && !state.sat) lookAt = null;
         steerHead(lookAt, dt, now, state.name === "act" ? state.headOverride : null);
+    }
+
+    // ── a bouncer at its post ───────────────────────────────────────────────
+    function recognised(o) {
+        var a = AvatarList.getAvatar(o.id), name = ((a && (a.displayName || a.sessionDisplayName)) || "").toLowerCase();
+        return name && (bot.recognise || []).some(function (r) { return name.indexOf(r.toLowerCase()) >= 0; });
+    }
+    function guardTick(dt, now, near) {
+        var g = guard = guard || { post: me.yaw, lastSeen: 0, nextShift: now + rnd(8000, 15000), nextMutter: now + 60000,
+                                   challenged: {}, shifting: 0 };
+        // who's about: the nearest visitor is watched; anyone arriving is challenged (or welcomed)
+        var watched = null, best = GUARD_RANGE;
+        near.forEach(function (o) {
+            if (o.duck || heard[String(o.id)]) return;           // other bots (by their model, or their announcing)
+            var d = dist(o.pos, me.pos);
+            if (d < best) { best = d; watched = o; }
+            if (d < ARRIVE_RANGE && now - (g.challenged[o.id] || 0) > 600000) {
+                g.challenged[o.id] = now;
+                var lines = recognised(o) ? line("welcome") : line("challenge");
+                if (lines) sayInTurn([].concat(lines));
+                log((recognised(o) ? "welcoming " : "challenging ") + o.id.substr(1, 4));
+            }
+        });
+        if (watched) g.lastSeen = now;
+        // the body: turn to face whoever it's watching if they're well off to the side (never far from its post), back
+        // to its post a while after they've gone; otherwise stand, shifting its weight now and then
+        if (state.name === "turn") {
+            turnTo(dt, state.yaw, state.after);
+        } else if (g.shifting > now) {
+            setCycle("walk", 0.5);
+        } else {
+            setCycle("idle");
+            var want = g.post;
+            if (watched) want = g.post + clamp(wrap(yawTowards(watched.pos) - g.post), -1.3, 1.3);
+            if (watched ? Math.abs(wrap(want - me.yaw)) > 0.8 : now - g.lastSeen > 12000 && Math.abs(wrap(g.post - me.yaw)) > 0.1) {
+                say("servo");
+                state = { name: "turn", yaw: watched ? want : g.post, after: { name: "guard" } };
+            } else if (now > g.nextShift) {
+                g.nextShift = now + rnd(10000, 25000);
+                g.shifting = now + 1600;
+                say("servo");
+                Script.setTimeout(function () { say("clank"); }, 900);
+            } else if (!watched && now > g.nextMutter) {
+                g.nextMutter = now + rnd(90000, 240000);
+                var m = line("idle");
+                if (m) sayInTurn([m]);
+            }
+        }
+        steerHead(watched ? Vec3.sum(watched.pos, { x: 0, y: 0.6, z: 0 }) : null, dt, now, null);
     }
 
     function walk(dt, now) {
@@ -446,6 +515,7 @@
         if (Math.abs(err) < 0.12) { state = after; return; }
         me.yaw = wrap(me.yaw + clamp(err, -TURN_RATE / GAIT * dt, TURN_RATE / GAIT * dt));
         setCycle(err > 0 ? "turn_left" : "turn_right", 2);
+        if (bot.role === "bouncer" && Math.random() < dt / 1.2) say("clank");
     }
 
     function arrive(then) {
@@ -692,12 +762,16 @@
         return taken;
     }
     function claim() {
-        var taken = botsAbout();
-        for (var i = 0; i < roster.bots.length; i++) if (!taken[roster.bots[i].id]) return roster.bots[i];
-        return pick(roster.bots);                 // more copies than bots: double up
+        if (typeof BOT_ID !== "undefined") {      // run from a bot's own loader (bot-<id>.js): that bot
+            for (var b = 0; b < roster.bots.length; b++) if (roster.bots[b].id === BOT_ID) return roster.bots[b];
+        }
+        var taken = botsAbout(), free = roster.bots.filter(function (x) { return !x.role; });
+        for (var i = 0; i < free.length; i++) if (!taken[free[i].id]) return free[i];
+        return pick(free);                        // more copies than bots: double up
     }
     // two copies that picked the same bot at once: the one with the higher session id picks again
     function checkClaim() {
+        if (typeof BOT_ID !== "undefined") return;
         var other = botsAbout()[bot.id];
         if (other && String(other) < String(Agent.sessionUUID)) {
             log("someone else is " + bot.name + "; picking again");
@@ -713,7 +787,8 @@
         // hatch: its home area's spot, or somewhere open in its home area, or in the roster's hatching area, or anywhere
         reach = null;                             // a new identity: its reach is worked out again from its hatching
         var start = -1;
-        if (area && area.hatch) start = nearestCell({ x: area.hatch[0], y: area.hatch[1], z: area.hatch[2] }, 1.0);
+        if (b.post) start = nearestCell({ x: b.post[0], y: b.post[1], z: b.post[2] }, 1.0);
+        else if (area && area.hatch) start = nearestCell({ x: area.hatch[0], y: area.hatch[1], z: area.hatch[2] }, 1.0);
         for (var tries = 0; tries < 4000 && !allowed(start); tries++) {
             var c = Math.floor(Math.random() * nav.cells.length);
             if (allowed(c) && (area || inHatch(c)) && !isEdge(c) && !isWall(c) && nav.links[c].length === 8) start = c;
@@ -723,8 +798,10 @@
         log("can reach " + reach.filter(function (x) { return x; }).length + " cells (" + (Date.now() - t0) + " ms)");
         me.node = start;
         me.pos = cellPos(start);
-        me.yaw = rnd(-Math.PI, Math.PI);
-        state = { name: "start" };
+        me.yaw = b.facing !== undefined ? b.facing : rnd(-Math.PI, Math.PI);
+        if (b.post) me.pos = { x: b.post[0], y: cellPos(start).y, z: b.post[2] };
+        state = { name: b.role === "bouncer" ? "guard" : "start" };
+        guard = null;
         announce();
         log("I'm " + b.name + " (size " + SIZE + (b.climbs === false ? ", no stairs" : "") + (b.home ? ", home " + b.home : "") +
             "), hatched at " + JSON.stringify(me.pos));

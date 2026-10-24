@@ -48,6 +48,28 @@ Each bot:
 
 Copies of the script take bots in roster order: with three running, the first three are about.
 
+## Bouncers and other roles
+
+A bot with a `role` doesn't wander and isn't taken by the wandering copies: it runs from its own persistent script,
+`bot-<id>.js` (build_bots.py writes it), one instance. The one role so far is `"bouncer"`: it guards a post, watches
+everyone within 15 m, swivels to follow them and turns to face anyone well off to the side, challenges arrivals
+within 12 m, answers anyone who talks to it, shifts its feet and mutters now and then.
+
+| field | what |
+|---|---|
+| `role` | `"bouncer"` |
+| `post` | `[x, y, z]`: where it stands |
+| `facing` | which way it faces there (radians; 0 faces -z, π/2 faces -x) |
+| `recognise` | names it welcomes rather than challenges (any part of a visitor's display name, any case) |
+| `voice` | its lines, `{"name": "what it says"}`: tools/make_voice.py speaks them into `sounds/<name>.wav` |
+| `lines` | which to say when: `welcome` (names), `challenge` (sequences of names, one picked per arrival; sounds like `countdown` work too), `reply` (when spoken to), `idle` (muttered when nobody's about) |
+
+`"style": {"build": "bouncer"}` builds it as a big armoured sentry (ED-209 crossed with an ABC Warrior): its hull
+low on its shoulders with a visor slit, a twin cannon and a rocket pod, armoured legs with hydraulic rams, clawed feet,
+rivets, exhausts and a sensor mast, and no lights. Give it a big `size` (3 is about 3 m) and plenty of `wear`.
+
+See the Madders Place roster's Warden for a full example.
+
 ## Styles
 
 | style | choices |

@@ -13,7 +13,8 @@ of the head); every bot has it, and only those with the jaw style have a separat
 lists the joints in the order a viewer builds them (docs/skeleton.md).
 
 Writes, into the output folder: duck-<id>.glb and duck-<id>.fst for each bot, their textures (bot-<id>-shell.png,
-bot-<id>-dark.png), fx-spark.png and a copy of the roster as bots.json.
+bot-<id>-dark.png), for a bot with a role its own persistent script (bot-<id>.js), fx-spark.png and a copy of the
+roster as bots.json.
 
 Usage: python build_bots.py [--roster examples/bots.json] [--out dist/bot] [bot id ...]
 """
@@ -189,6 +190,8 @@ def box(lo, hi):
 # ── the bot ─────────────────────────────────────────────────────────────────
 def design(sk, style):
     """[(mesh, material, bone, smooth)] for a bot of this style, in the rest pose."""
+    if style.get("build") == "bouncer":
+        return design_bouncer(sk, style)
     parts = []
 
     def add(mesh, material, bone, smooth=True):
@@ -289,6 +292,127 @@ def design(sk, style):
     if style.get("crest"):
         zmin, zmax = shell.bounds[0][2], shell.bounds[1][2]
         add(ridge(shell, 0, zmin + 0.09, zmax - 0.05, 0.012, 0.022), "glow", "head_roll")
+    return parts
+
+
+HULL_DROP = -0.22               # the bouncer's hull sits this much lower than a duck's head
+
+
+def rivets(add, bone, points, r=0.008):
+    for p in points:
+        add(ellipsoid(p, [r, r, r], 1), "dark", bone)
+
+
+def design_bouncer(sk, style):
+    """A big armoured sentry on the same skeleton, ED-209 crossed with an ABC Warrior: no lights, all plate, rivets,
+    hydraulics and guns. Its main hull rides on head_roll, the way ED-209's body carries its guns, so it can swivel
+    to watch people; the pelvis is on Hips; the legs are the duck's bird legs, armoured; big clawed feet."""
+    parts = []
+
+    def add(mesh, material, bone, smooth=True):
+        parts.append((mesh, material, bone, smooth))
+
+    # pelvis: a heavy armoured block, skirt plates front and back, hip drums, exhaust stacks on its back
+    add(rounded_box([-0.15, -0.13, -0.15], [0.15, 0.1, 0.15], 0.03), "shell", "Hips")
+    add(rounded_box([-0.13, -0.17, -0.165], [0.13, -0.04, -0.14], 0.01), "shell", "Hips")          # front skirt
+    add(rounded_box([-0.13, -0.17, 0.14], [0.13, -0.04, 0.165], 0.01), "shell", "Hips")            # back skirt
+    add(rounded_box([-0.11, 0.1, -0.12], [0.11, 0.13, 0.12], 0.015), "dark", "Hips")                # top plate
+    rivets(add, "Hips", [[x, y, -0.168] for x in (-0.11, -0.04, 0.04, 0.11) for y in (-0.15, -0.06)])
+    rivets(add, "Hips", [[x, -0.02, z] for x in (-0.152, 0.152) for z in (-0.11, 0.0, 0.11)])
+    for x in (-0.07, 0.07):
+        add(capsule([x, 0.0, 0.16], [x, 0.09, 0.19], 0.022), "dark", "Hips")                      # exhaust stubs
+        add(disc([x, 0.1, 0.193], [0, 0.3, 1], 0.03, 0.02), "dark", "Hips", False)
+
+    # legs: actuators at the hip, armoured thighs and shins with hydraulic rams beside them, knee caps, clawed feet
+    for side, sx in (("left", -1), ("right", 1)):
+        hy, hr, hp, kn, an = (sk.pos("%s_%s" % (side, n)) for n in ("hip_yaw", "hip_roll", "hip_pitch", "knee", "ankle"))
+        add(capsule(hy, hr, 0.05), "dark", side + "_hip_yaw")
+        add(rounded_box(np.minimum(hr, hp) - 0.055, np.maximum(hr, hp) + 0.055, 0.02), "dark", side + "_hip_roll")
+        for joint, bone, r in ((hp, side + "_hip_pitch", 0.085), (kn, side + "_knee", 0.07), (an, side + "_ankle", 0.06)):
+            ax = sk.axis(bone)
+            add(disc(joint, ax, r, 0.09), "dark", bone, False)
+            add(disc(joint, ax, r * 0.6, 0.1), "shell", bone, False)
+            add(disc(joint, ax, r * 0.25, 0.105), "dark", bone, False)
+        # thigh: a thick armour shell, a plate on the outside, a ram behind
+        add(tapered(hp, kn, 0.07, 0.058), "shell", side + "_hip_pitch")
+        plate_out = np.array([sx * 0.05, 0, 0])
+        add(tapered(hp + plate_out + [0, -0.01, 0], kn + plate_out + [0, 0.03, 0], 0.035, 0.03), "shell", side + "_hip_pitch")
+        add(capsule(hp + [0, -0.02, 0.07], kn + [0, 0.03, 0.06], 0.016), "dark", side + "_hip_pitch")
+        add(ellipsoid(kn + [0, 0, -0.01], [0.075, 0.07, 0.07]), "shell", side + "_knee")              # knee cap
+        # shin
+        add(tapered(kn, an, 0.055, 0.045), "shell", side + "_knee")
+        add(capsule(kn + [0, -0.03, -0.065], an + [0, 0.04, -0.06], 0.014), "dark", side + "_knee")
+        add(capsule(kn + [sx * 0.045, -0.04, -0.04], an + [sx * 0.04, 0.05, -0.04], 0.01), "dark", side + "_knee")
+        # foot: a wide armoured slab, three claws forward, a spur behind, an armoured ankle
+        add(rounded_box([an[0] - 0.1, FLOOR, -0.17], [an[0] + 0.1, FLOOR + 0.075, 0.13], 0.025), "shell", side + "_ankle")
+        add(rounded_box([an[0] - 0.09, FLOOR + 0.07, -0.12], [an[0] + 0.09, FLOOR + 0.1, 0.09], 0.02), "dark", side + "_ankle")
+        for dx in (-0.065, 0, 0.065):
+            add(tapered([an[0] + dx, FLOOR + 0.035, -0.17], [an[0] + dx, FLOOR + 0.015, -0.27], 0.03, 0.012), "dark",
+                side + "_ankle")
+        add(tapered([an[0], FLOOR + 0.04, 0.13], [an[0], FLOOR + 0.02, 0.21], 0.028, 0.01), "dark", side + "_ankle")
+        add(tapered(an, [an[0], FLOOR + 0.09, -0.02], 0.045, 0.06), "dark", side + "_ankle")
+        rivets(add, side + "_ankle", [[an[0] + x, FLOOR + 0.077, z] for x in (-0.075, 0.075) for z in (-0.13, 0.09)])
+
+    # the spine: an armoured column with rams either side, up to a heavy turret ring
+    npc, hpc, hyc = sk.pos("neck_pitch"), sk.pos("head_pitch"), sk.pos("head_yaw")
+    centre = lambda p: np.array([0, p[1], p[2]])
+    add(disc(centre(npc), [1, 0, 0], 0.07, 0.2), "dark", "neck_pitch", False)
+    add(disc(centre(npc), [1, 0, 0], 0.045, 0.21), "shell", "neck_pitch", False)
+    add(tapered(centre(npc), centre(hpc), 0.07, 0.06), "shell", "neck_pitch")
+    for k in np.linspace(0.25, 0.75, 3):                                 # armour collars
+        add(disc(centre(npc) + (centre(hpc) - centre(npc)) * k, centre(hpc) - centre(npc), 0.078, 0.025), "dark",
+            "neck_pitch", False)
+    for x in (-0.085, 0.085):
+        add(capsule(centre(npc) + [x, 0.02, 0.03], centre(hpc) + [x, -0.03, 0.02], 0.014), "dark", "neck_pitch")
+    add(disc(centre(hpc), [1, 0, 0], 0.06, 0.16), "dark", "head_pitch", False)
+    add(capsule(centre(hpc), centre(hyc), 0.06), "dark", "head_pitch")
+    add(disc(hyc + [0, 0.02, 0], [0, 1, 0], 0.14, 0.05), "dark", "head_yaw", False)
+    rivets(add, "head_yaw", [hyc + [0.12 * np.cos(a), 0.047, 0.12 * np.sin(a)] for a in np.linspace(0, 2 * np.pi, 10, endpoint=False)])
+
+    # the hull: wide and angular, its chin and brow sloping back, a dark visor slit, armour plates and rivets
+    lo, hi = np.array([-0.27, 0.43, -0.36]), np.array([0.27, 0.68, 0.22])
+    hull = rounded_box(lo, hi, 0.03)
+    v = hull.vertices.copy()
+    front = np.clip((v[:, 2] - lo[2]) / 0.22, 0, 1)                     # 0 at the very front, 1 from 22 cm back
+    mid = 0.5 * (lo[1] + hi[1])
+    v[:, 1] = np.where(v[:, 1] < mid, v[:, 1] + (1 - front) * 0.07, v[:, 1] - (1 - front) * 0.09)   # chin and brow
+    v[:, 0] *= np.where(v[:, 2] < lo[2] + 0.1, 0.86, 1.0)               # a narrower nose
+    hull.vertices = v
+    add(hull, "shell", "head_roll")
+    add(rounded_box([-0.2, 0.555, lo[2] + 0.005], [0.2, 0.585, lo[2] + 0.06], 0.008), "lens", "head_roll")
+    add(rounded_box([-0.22, 0.64, -0.2], [0.22, 0.685, 0.16], 0.015), "shell", "head_roll")        # top armour
+    add(rounded_box([-0.18, 0.68, -0.12], [0.18, 0.7, 0.1], 0.008), "dark", "head_roll")
+    rivets(add, "head_roll", [[x, 0.688, z] for x in (-0.2, -0.07, 0.07, 0.2) for z in (-0.18, 0.14)])
+    rivets(add, "head_roll", [[x, y, hi[2] + 0.002] for x in (-0.22, 0, 0.22) for y in (0.47, 0.62)])
+    # cooling fins and a power pack on its back
+    add(rounded_box([-0.18, 0.46, hi[2] - 0.01], [0.18, 0.64, hi[2] + 0.06], 0.012), "dark", "head_roll")
+    for x in np.linspace(-0.15, 0.15, 7):
+        add(box([x - 0.006, 0.47, hi[2] + 0.06], [x + 0.006, 0.63, hi[2] + 0.1]), "dark", "head_roll", False)
+    # a sensor mast with a small dish
+    add(capsule([0.17, hi[1], 0.12], [0.19, hi[1] + 0.16, 0.14], 0.012), "dark", "head_roll")
+    add(disc([0.19, hi[1] + 0.15, 0.115], [0.2, 0.3, -1], 0.04, 0.01), "shell", "head_roll", False)
+
+    # left arm: a twin cannon on a heavy mount; right arm: a six-tube rocket pod
+    add(rounded_box([-0.39, 0.45, -0.16], [-0.26, 0.63, 0.14], 0.025), "shell", "head_roll")       # left mount
+    add(disc([-0.27, 0.54, -0.01], [1, 0, 0], 0.08, 0.05), "dark", "head_roll", False)             # shoulder bearing
+    for y in (0.5, 0.58):
+        b0, b1 = np.array([-0.325, y, -0.16]), np.array([-0.325, y, -0.58])
+        add(capsule(b0, b1, 0.024), "dark", "head_roll")
+        add(disc(b1 + [0, 0, 0.03], [0, 0, 1], 0.034, 0.05), "dark", "head_roll", False)           # muzzle brake
+        add(disc(b1 + [0, 0, -0.002], [0, 0, 1], 0.014, 0.06), "lens", "head_roll", False)          # the bore
+    add(rounded_box([-0.37, 0.47, -0.32], [-0.28, 0.61, -0.15], 0.015), "shell", "head_roll")     # barrel shroud
+    add(rounded_box([0.26, 0.46, -0.24], [0.42, 0.64, 0.12], 0.025), "shell", "head_roll")         # rocket pod
+    add(disc([0.27, 0.55, -0.01], [1, 0, 0], 0.08, 0.05), "dark", "head_roll", False)
+    for x in (0.3, 0.38):
+        for y in (0.49, 0.55, 0.61):
+            add(disc([x, y, -0.244], [0, 0, 1], 0.022, 0.012), "lens", "head_roll", False)
+    rivets(add, "head_roll", [[x, 0.643, z] for x in (0.28, 0.4) for z in (-0.2, 0.08)])
+    rivets(add, "head_roll", [[x, 0.633, z] for x in (-0.37, -0.28) for z in (-0.12, 0.1)])
+    # the hull and guns hang low, squat over the pelvis like ED-209's body, with the spine up inside them (it still
+    # swivels on the head's joints to watch people)
+    for mesh, material, bone, smooth in parts:
+        if bone == "head_roll":
+            mesh.apply_translation([0, HULL_DROP, 0])
     return parts
 
 
@@ -468,6 +592,12 @@ def main():
         style = dict(bot.get("style", {}), rockets=bot.get("rockets", False))
         tris = write(out / ("duck-%s.glb" % bot["id"]), sk, design(sk, style), materials(bot), textures)
         write_fst(out, bot, joints)
+        if bot.get("role"):
+            # a bot with a role (a bouncer) runs from its own persistent script, which names it
+            loader = ["//", "//  bot-%s.js: %s's own persistent script (darkride-bots): the brain, as this bot (%s)."
+                      % (bot["id"], bot["name"], bot["role"]), "//", "var BOT_ID = %s;" % json.dumps(bot["id"]),
+                      'Script.include(Script.resolvePath("duck-brain.js"));', ""]
+            (out / ("bot-%s.js" % bot["id"])).write_text("\n".join(loader), encoding="utf-8")
         print("%-8s %-8s size %.2f wear %.2f  %s  %d triangles" % (bot["id"], bot["name"], bot.get("size", 1),
               bot.get("wear", 0.3), json.dumps(bot.get("style", {})), tris))
     (out / "bots.json").write_text(json.dumps(roster, indent=1), encoding="utf-8")       # as given, without the defaults

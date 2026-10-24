@@ -4,7 +4,8 @@
 
 Into the output folder: the runtime (duck-bot.js, the persistent script; duck-brain.js; duck-cycles.json, the
 recorded walks and moves; sounds/), each bot's model, textures and .fst from the roster (build_bots.py), the roster
-itself as bots.json, and the world's walkable map as nav.json (build_nav.py with the world config). With --zip, also
+itself as bots.json, speaking bots' lines (make_voice.py, on Windows), and the world's walkable map as nav.json
+(build_nav.py with the world config). With --zip, also
 a .zip of it next to the folder. Upload the folder's contents so they sit together at one URL, then run duck-bot.js
 as the domain's persistent script with one instance per bot.
 """
@@ -37,6 +38,12 @@ def main():
     print("runtime copied")
     subprocess.run([sys.executable, str(KIT / "tools" / "build_bots.py"), "--roster", str(roster), "--out", str(out)],
                    check=True)
+    if any(b.get("voice") for b in json.loads(roster.read_text(encoding="utf-8"))["bots"]):
+        if sys.platform == "win32":
+            subprocess.run([sys.executable, str(KIT / "tools" / "make_voice.py"), "--roster", str(roster), "--out", str(out)],
+                           check=True)
+        else:
+            print("this roster has voice lines: make them on Windows with tools/make_voice.py")
     if "--skip-nav" not in sys.argv:
         # the world config's own "out" is replaced by this folder's nav.json
         config_path = pathlib.Path(world).resolve()
