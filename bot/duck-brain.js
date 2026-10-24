@@ -388,7 +388,9 @@
         var p = route(me.node, cell);
         if (Date.now() - t0 > 100) log("route of " + p.length + " cells took " + (Date.now() - t0) + " ms");
         if (p.length < 2) { idle(rnd(1, 3)); return; }
-        path = p; pathAt = 1; plannedAt = Date.now(); progressAt = Date.now(); lastPos = me.pos;
+        // it heads for the second cell from where it stands, unless the first step is a rocket hop: walk() only looks
+        // for a hop from path[pathAt], and walked, a hop's 6 m is one step's change of floor height (a teleport)
+        path = p; pathAt = isHop(p[0], p[1]) ? 0 : 1; plannedAt = Date.now(); progressAt = Date.now(); lastPos = me.pos;
         state = { name: "walk", then: then, why: why };
     }
     // (a lively bot idles less, a lazy one more)
