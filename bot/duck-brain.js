@@ -47,8 +47,10 @@
 //  sixpence, pauses to chatter at walls and corners, never sits or rolls, and bolts with a squeal from any stranger who
 //  comes near (it's shy whatever its personality says, unless they're an old friend).
 //
-//  An astromech ("build": "astromech", an R-unit sort): it glides along on its feet's wheels (no walk cycle), its body
-//  tilting back between its upright legs as it drives (on its shoulders: neck_pitch), keeps the rest of its neck still and turns its whole dome to look at things, whistles and warbles, screams when
+//  An astromech ("build": "astromech", an R-unit sort): it glides along on its feet's wheels (no walk cycle). Standing,
+//  its legs are upright; driving, it goes onto three legs as R2 does: the side legs angle back about their ankle
+//  hinges (feet flat, planted), the body tilts back on its shoulders (neck_pitch) and the middle leg's wheel comes
+//  forward under it for balance. It keeps the rest of its neck still and turns its whole dome to look at things, whistles and warbles, screams when
 //  startled, and instead of sitting or rolling spins its dome or rocks on the spot.
 //  A power droid ("build": "power", a gonk): it waddles slowly on its stubby legs, honks, and never rolls.
 //
@@ -93,7 +95,10 @@
     var following = null, stayUntil = 0, tour = null, guide = null;
     var mind = { energy: 0.5, curiosity: 0.5, shyness: 0.5, chattiness: 0.5, sociability: 0.5 };
     var memory = { visitors: {}, bots: {} }, memoryDirty = false, memorySavedAt = 0, PACE = 1, MOUSE = false, ASTRO = false, POWER = false;
-    var lean = 0, LEAN_DRIVE = 0.3;                      // an astromech's body tilting back as it drives (rad)
+    // an astromech's tripod: its body's tilt back and its legs' angle back as it drives (rad), eased in and out; its
+    // legs are built raked back by RAKE (from the shoulder to the ankle hinge, build_bots.py), so standing upright
+    // turns them forward by that; HINGE: the ankle hinges (y, z in the model), which stay put on the floor
+    var lean = 0, legs = 0, LEAN_DRIVE = 0.3, LEGS_DRIVE = 0.2, RAKE = 0.2017, HINGE = { y: -0.379, z: 0 };
     var roster = null, bot = null, SIZE = 1, GAIT = 1, area = null;
 
     function log(t) { print("duck " + (Agent.sessionUUID || "").substr(1, 4) + ": " + t); }
@@ -1057,17 +1062,25 @@
     var HALF_TURN = { x: 0, y: 1, z: 0, w: 0 };
     function applyRow(row, k0) {
         var abs = { Hips: Quat.multiply(HALF_TURN, { x: row[k0], y: row[k0 + 1], z: row[k0 + 2], w: row[k0 + 3] }) };
-        if (ASTRO) abs.Hips = HALF_TURN;                            // its legs stand still, upright
+        var level = null;
+        if (ASTRO) {                                                // its legs: upright standing, angled back driving
+            abs.Hips = Quat.multiply(HALF_TURN, Quat.angleAxis((RAKE - legs) * 180 / Math.PI, Vec3.UNIT_X));
+            level = { Hips: HALF_TURN };                            // (the same chain unturned, for the feet)
+        }
         rotations[order[0]] = abs.Hips;
         for (var j = 0; j < cyc.joints.length; j++) {
             var name = cyc.joints[j], k = k0 + 4 + j * 4;
             var q = { x: row[k], y: row[k + 1], z: row[k + 2], w: row[k + 3] };
             var extra = look.weight > 0.01 || ASTRO ? headAngle(name) : null;
             if (ASTRO && extra !== null) q = jointQuat(name, cyc.rest[name] + (name === "head_yaw" ? extra * look.weight :
-                                                                              name === "neck_pitch" ? lean : 0));
+                                                                              name === "neck_pitch" ? lean - (RAKE - legs) : 0));
             else if (ASTRO) q = jointQuat(name, cyc.rest[name]);       // legs at rest: they're rigid struts
             else if (extra !== null) q = Quat.slerp(q, jointQuat(name, cyc.rest[name] + extra), look.weight);
             abs[name] = Quat.multiply(abs[cyc.parents[name]], q);
+            if (level) {
+                level[name] = Quat.multiply(level[cyc.parents[name]], q);
+                if (/_ankle$/.test(name)) abs[name] = level[name];       // the feet stay flat on the floor
+            }
             rotations[order[j + 1]] = abs[name];
         }
         for (var e = 0; e < extraJoints.length; e++) rotations[extraJoints[e]] = HALF_TURN;
@@ -1093,7 +1106,16 @@
         var frame = c.frames[Math.floor(cycleTime * cyc.fps) % c.frames.length];
         Avatar.position = { x: me.pos.x, y: me.pos.y + (cyc.trunkHeight + frame[0]) * SIZE, z: me.pos.z };
         Avatar.orientation = yawQuat(me.yaw);
-        if (ASTRO) lean += ((state.name === "walk" ? LEAN_DRIVE : 0) - lean) * Math.min(1, dt * 2.5);   // eased in and out
+        if (ASTRO) {
+            var ease = Math.min(1, dt * 2.5), driving = state.name === "walk";
+            lean += ((driving ? LEAN_DRIVE : 0) - lean) * ease;
+            legs += ((driving ? LEGS_DRIVE : 0) - legs) * ease;
+            // the hips (and the legs on them) turn about the model's origin; move it so the ankle hinges stay put
+            var a = RAKE - legs;
+            var turned = { y: HINGE.y * Math.cos(a) - HINGE.z * Math.sin(a), z: HINGE.y * Math.sin(a) + HINGE.z * Math.cos(a) };
+            var keep = { x: 0, y: (HINGE.y - turned.y) * SIZE, z: (HINGE.z - turned.z) * SIZE };
+            Avatar.position = Vec3.sum(Avatar.position, Vec3.multiplyQbyV(Avatar.orientation, keep));
+        }
         if (order) applyRow(frame, 1);
     }
     // the avatar's joint order: the .fst's jointIndex list, which matches the skeleton a viewer builds (ROOT, the duck's

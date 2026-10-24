@@ -534,10 +534,11 @@ ASTRO_AXIS = [0, -0.036]        # the astromech's body and dome share the head's
 def design_astromech(sk, style):
     """An astromech (the R-series sort): a barrel of a body on two side legs with a third in the middle, a domed head
     that swivels (on head_yaw) to look about. No neon: a radar eye, a holo-projector, two small logic panels, and
-    its second paint on the dome and body panels. As R2 does when it drives, the body tilts back between its legs on
-    its shoulders while the side legs stay upright, feet flat: so the body (and its middle leg) rides on neck_pitch,
-    whose joint is where the shoulders are, turning about the same sideways axis, and the side legs ride on Hips.
-    The dome is on head_yaw, above them. The duck's own legs are hidden inside (the brain glides it along)."""
+    its second paint on the dome and body panels. As R2 does when it drives, it stands as a tripod: the side legs
+    angle back, the body tilts back on its shoulders and its middle leg's wheel comes forward under it. So the body
+    (with its middle leg) rides on neck_pitch, whose joint is where the shoulders are; the side legs ride on Hips (the
+    brain turns them about their ankle hinges); the feet on the ankle bones (kept level); the dome on head_yaw. The
+    duck's own legs are hidden inside (the brain glides it along)."""
     parts = []
 
     def add(mesh, material, bone="Hips", smooth=True):
@@ -565,23 +566,38 @@ def design_astromech(sk, style):
     for sx in (-1, 1):
         body(box([sx * (r - 0.02) - 0.02, y0 + 0.05, cz - 0.06], [sx * (r - 0.02) + 0.02, sy - 0.08, cz + 0.06]), "trim", False)
         body(cylinder([sx * (r + 0.005), sy, lz], [1, 0, 0], 0.075, 0.03), "dark", False)        # the shoulder socket
-    # the middle leg: a short strut tucked under the skirt, standing upright on the floor (on Hips), so as the body
-    # tilts back over it, it shows below, planted, as R2's third leg is when it drives
-    add(rounded_box([cx - 0.035, FLOOR + 0.04, cz - 0.04], [cx + 0.035, y0 - 0.02, cz + 0.03], 0.015), "metal")
-    add(rounded_box([cx - 0.05, FLOOR, cz - 0.08], [cx + 0.05, FLOOR + 0.05, cz + 0.06], 0.015), "dark")
-    # the side legs: a shoulder hub on the pivot, a broad strut straight down to a big foot (they stay upright)
+    # the middle leg: down from the body's underside to a caster wheel; it tilts with the body, so as the body leans
+    # back while driving, the wheel comes forward under it (a wheel looks right at any angle)
+    wheel_r, wy = 0.06, FLOOR + 0.06
+    body(rounded_box([cx - 0.03, wy + 0.02, cz - 0.04], [cx + 0.03, y0, cz + 0.03], 0.012), "metal")
+    for side in (-1, 1):                                                 # the caster's fork
+        body(rounded_box([cx + side * 0.04 - 0.008, wy - 0.01, cz - 0.05], [cx + side * 0.04 + 0.008, wy + 0.05, cz + 0.04], 0.006), "dark")
+    body(cylinder([cx, wy, cz], [1, 0, 0], wheel_r, 0.06), "dark", False)
+    body(cylinder([cx, wy, cz], [1, 0, 0], wheel_r * 0.45, 0.065), "metal", False)
+    # the side legs: from the shoulder (the pivot) down to an ankle hinge on the skeleton's own ankle joint, so they're
+    # raked back a little as built (the brain turns them upright when standing, and further back when driving); the
+    # feet ride on the ankle bones, which the brain keeps level, so they stay flat on the floor
+    def strut(a, b, half_x, half_z):
+        ends = [rounded_box(np.array(p) - [half_x, 0.02, half_z], np.array(p) + [half_x, 0.02, half_z], 0.012).vertices
+                for p in (a, b)]
+        return trimesh.convex.convex_hull(np.vstack(ends))
+
     for sx in (-1, 1):
+        side = "left" if sx < 0 else "right"
         x = sx * (r + 0.045)
+        hinge = np.array([x, sk.pos(side + "_ankle")[1], sk.pos(side + "_ankle")[2]])
+        shoulder = np.array([x, sy, lz])
         add(cylinder([sx * (r + 0.025), sy, lz], [1, 0, 0], 0.065, 0.04), "metal", smooth=False)
         add(cylinder([sx * (r + 0.048), sy, lz], [1, 0, 0], 0.04, 0.012), "trim", smooth=False)
         add(cylinder([sx * (r + 0.056), sy, lz], [1, 0, 0], 0.014, 0.012), "dark", smooth=False)
-        add(rounded_box([x - 0.03, FLOOR + 0.1, lz - 0.045], [x + 0.03, sy + 0.05, lz + 0.045], 0.02), "shell")
-        add(box([x - 0.032, FLOOR + 0.2, lz - 0.02], [x + 0.032, sy - 0.08, lz + 0.02]), "trim", smooth=False)
-        add(rounded_box([x - 0.05, FLOOR, lz - 0.13], [x + 0.05, FLOOR + 0.12, lz + 0.09], 0.025), "shell")
-        add(rounded_box([x - 0.045, FLOOR - 0.003, lz - 0.12], [x + 0.045, FLOOR + 0.02, lz + 0.08], 0.008), "dark")
-        add(cylinder([x, FLOOR + 0.1, lz - 0.02], [1, 0, 0], 0.035, 0.11), "metal", smooth=False)   # the ankle
+        add(strut(shoulder + [0, 0.05, 0], hinge + [0, 0.02, 0], 0.03, 0.045), "shell")
+        add(strut(shoulder - [0, 0.07, 0], hinge + [0, 0.1, 0], 0.033, 0.02), "trim", smooth=False)
+        ankle = side + "_ankle"
+        add(cylinder(hinge, [1, 0, 0], 0.035, 0.11), "metal", ankle, False)                       # the ankle hinge
+        add(rounded_box([x - 0.05, FLOOR, hinge[2] - 0.11], [x + 0.05, FLOOR + 0.11, hinge[2] + 0.11], 0.025), "shell", ankle)
+        add(rounded_box([x - 0.045, FLOOR - 0.003, hinge[2] - 0.1], [x + 0.045, FLOOR + 0.02, hinge[2] + 0.1], 0.008), "dark", ankle)
         if style.get("rockets"):                                         # booster pods on the outside of each leg
-            c = np.array([x + sx * 0.045, FLOOR + 0.32, lz + 0.02])
+            c = shoulder + 0.55 * (hinge - shoulder) + [sx * 0.045, -0.05, 0.02]
             add(capsule(c + [0, 0.1, 0], c, 0.026), "metal")
             add(disc(c + [0, -0.02, 0], [0, 1, 0], 0.03, 0.03), "dark", smooth=False)
     # the dome: silver, panels in its second paint, a radar eye, a holo-projector, two little logic panels
