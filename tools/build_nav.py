@@ -110,7 +110,7 @@ def local_file(url):
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
-                request = urllib.request.Request(url, headers={"User-Agent": "darkride-bots build_nav"})
+                request = urllib.request.Request(url, headers={"User-Agent": "darkride-automata build_nav"})
                 target.write_bytes(urllib.request.urlopen(request, timeout=60).read())
             except Exception as error:
                 print("  couldn't download %s: %s" % (url, str(error)[:80]))

@@ -1,5 +1,5 @@
 //
-//  duck-brain.js: a wandering bot, a scripted agent avatar on the Microduck's skeleton (darkride-bots). Loaded by
+//  duck-brain.js: a wandering bot, a scripted agent avatar on the Microduck's skeleton (darkride-automata). Loaded by
 //  duck-bot.js, the domain's persistent script, run with as many instances as bots: each wears its bot's model.
 //  See docs/how-it-works.md.
 //

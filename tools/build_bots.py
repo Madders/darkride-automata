@@ -694,7 +694,7 @@ def tangents(pos, nrm, uv, faces):
 def write(path, sk, parts, mats, textures):
     nodes = skeleton_nodes(sk)
     jaw_node = len(nodes) - 1
-    out = {"asset": {"version": "2.0", "generator": "darkride-bots build_bots.py"}, "scene": 0,
+    out = {"asset": {"version": "2.0", "generator": "darkride-automata build_bots.py"}, "scene": 0,
            "scenes": [{"nodes": sk.data["roots"]}], "nodes": nodes, "skins": [], "meshes": [], "materials": [],
            "accessors": [], "bufferViews": [], "buffers": []}
     data = bytearray()
@@ -829,7 +829,7 @@ def main():
         write_fst(out, bot, joints)
         if bot.get("role"):
             # a bot with a role (a bouncer) runs from its own persistent script, which names it
-            loader = ["//", "//  bot-%s.js: %s's own persistent script (darkride-bots): the brain, as this bot (%s)."
+            loader = ["//", "//  bot-%s.js: %s's own persistent script (darkride-automata): the brain, as this bot (%s)."
                       % (bot["id"], bot["name"], bot["role"]), "//", "var BOT_ID = %s;" % json.dumps(bot["id"]),
                       'Script.include(Script.resolvePath("duck-brain.js"));', ""]
             (out / ("bot-%s.js" % bot["id"])).write_text("\n".join(loader), encoding="utf-8")

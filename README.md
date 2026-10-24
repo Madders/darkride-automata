@@ -1,33 +1,47 @@
-# darkride-bots
+# darkride-automata
 
-Little walking robots for your Darkride (or Overte-family) world: a crew of droids that wander your domain on their
-own, climb stairs, peer over edges, look at things, greet visitors and each other, sit, peck, kick and roll, answer
-you in beeps when you talk to them, and, for the small ones, rocket up to the upper floors.
+Little mechanical residents for your Darkride (or Overte-family) world: a crew of automata that live in your domain
+on their own. They wander, climb stairs, peer over edges, look at things, greet visitors and each other, sit, peck,
+kick and roll, answer you in beeps when you talk to them, and take spoken commands (most of the time). The small
+ones rocket up to the upper floors. Each has its own personality and remembers who it has met.
 
 They walk with real robot motion: every step, turn, sit and roll was recorded from the trained walking and trick
 policies of Pollen Robotics' open-source [Microduck](https://github.com/pollen-robotics/microduck_rl) robot, run in
-the MuJoCo physics simulator. The bots' bodies are our own, built from clean parts on the Microduck's skeleton, in as
-many styles as you like, weathered like Star Wars droids from factory-fresh to beaten up.
+the MuJoCo physics simulator. Their bodies are our own, built from clean parts on the Microduck's skeleton, in as
+many styles as you like, panelled and weathered in a lived-in, used-future look, from factory-fresh to beaten up.
 
-![Bots in Madders Place](examples/bots-in-world.jpg)
+![Automata in Madders Place](examples/bots-in-world.jpg)
 
-And a **bouncer**: a big armoured sentry (ED-209 crossed with an ABC Warrior) that guards the door, watches people
-arrive, swivels its guns to follow them and challenges strangers in a slow, canned machine voice.
+Beyond the walkers there are other kinds:
+
+- **A bouncer**: a big armoured sentry (ED-209 crossed with an ABC Warrior) that guards the door, watches people
+  arrive, swivels its guns to follow them and challenges strangers in a slow, canned machine voice.
+- **A tour guide**: offers newcomers a tour, leads them round your world's sights and waits for stragglers.
+- **A mouse droid**: a little box that scurries along the walls and bolts, squealing, from anyone it doesn't know.
+- **A power droid**: a walking battery box on stubby legs that plods about honking.
+- **An astromech**: a domed barrel on three legs that rolls about, leaning back as it drives, and turns its dome
+  to look at you.
 
 ![The bouncer by the door](examples/bouncer-in-world.jpg)
+
+(Inside, the files still say "bot": `bots.json`, `duck-bot.js` and so on.)
 
 ## What you get
 
 - **The runtime** (`bot/`): the script your domain runs for each bot (`duck-bot.js` loading `duck-brain.js`), the
   recorded walks and moves (`duck-cycles.json`), and the bots' voices (`sounds/`, synthesised beeps and chirps).
-- **A bot builder** (`tools/build_bots.py`): makes each bot's model from a roster (`bots.json`): size, colours, wear,
-  head shape, eyes, antennas, fins, crest, jaw, rocket pods.
+- **A builder** (`tools/build_bots.py`): makes each one's model from a roster (`bots.json`): its body (walker,
+  bouncer, mouse droid, power droid, astromech), size, colours, wear, head shape, eyes, antennas, fins, crest, jaw,
+  rocket pods, a guide's pennant; weathered textures with normal maps.
 - **A map builder** (`tools/build_nav.py`): makes the bots' walkable map of your world from its entities: floors on
   every level, stairs, walls, drops, rocket hops and things worth looking at.
 - **A packager** (`tools/package.py`): builds the folder of files to upload to your asset server.
 - **A voice maker** (`tools/make_voice.py`, Windows): speaking bots' lines, made into a machine's voice.
 - **The motion recorder** (`motions/`): if you want to record new moves from Pollen's policies.
-- **Tests** (`tests/`): Interface scripts that photograph the bots, check their joints, make them talk and hop.
+- **Ears and memory** (`tools/hearing.py`): a small offline speech service for spoken commands, which also keeps
+  their memories.
+- **Tests** (`tests/`): scripts that photograph them, check their joints, make them talk and hop, give spoken
+  commands and take a tour.
 
 ## Quick start
 
