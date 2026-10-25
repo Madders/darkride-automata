@@ -98,7 +98,8 @@ body's assignment client is started does.
 
 1. **The account.** On vr.darkride.ai, register the bot (its username, 4-16 letters, digits or `_`, is the name
    everyone sees) and make its **connection key** (`tvk_...`). Treat the key like a password.
-2. **Its own assignment client**, in a pool named after its username, with the account in its environment:
+2. **Its own assignment client**, in a pool named after its username (spelt the same in both places, capitals
+   included: the domain matches pool names exactly), with the account in its environment:
    ```
    HIFI_AC_USERNAME=<username>  HIFI_AC_KEY=<key>  HIFI_METAVERSE_URL=https://vr.darkride.ai
    assignment-client -t 2 --pool <username> -a <domain address> --server-port <domain port, 40102 by default>
@@ -117,8 +118,9 @@ body's assignment client is started does.
    paused by its host, and so on), and the bot then runs as before, anonymous.
 
 What the brain does about it: nothing you need to set. Who the bot is comes from its loader (`BOT_ID`), never from the
-account, so the username can be anything ("madders_scout" for Scout). Visitors still call it by its roster name in
-voice commands ("Scout, follow me"), because the speech service listens for the roster's names. If a plain
+account, so the username can be anything ("Bot_Scout" for Scout), and it's what the nametag, the People list and chat
+show, not the roster's name. Visitors still call it by its roster name in voice commands ("Scout, follow me"),
+because the speech service listens for the roster's names. If a plain
 `duck-bot.js` copy had already taken that bot (the domain started it first), the copy gives way to the loader and
 becomes another bot. While it waits for what it heard to be recognised, it sends `{busy: true}`, then `{done: true}`,
 on the Messages channel `tivoli.ai-resident`, which a nametag that has a mark uses to animate it. Without an account (a
