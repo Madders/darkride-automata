@@ -1,4 +1,4 @@
-"""Weathered paint for the bots, Star Wars droid style (2026-10-24): textures per bot for its shell, its dark metal, its
+"""Weathered paint for the bots, in a used-future style (2026-10-24): textures per bot for its shell, its dark metal, its
 bare metal and its trim (second paint), from its colours and its wear (0 factory-fresh to 1 beaten up); and with each
 a normal map, so panel lines, rivets, chips and scratches catch the light as relief rather than being painted flat.
 
@@ -90,7 +90,7 @@ def shell_texture(bot, seed, colour=None, markings=True, second_panels=True):
     img *= (1 - 0.55 * line)[..., None]
     img *= (1 - np.clip(near * (0.6 + 1.6 * wear), 0, 0.55))[..., None]
 
-    # markings: the unit number stencilled on, and hazard stripes on the working droids
+    # markings: the unit number stencilled on, and hazard stripes on the working bots
     marks = Image.new("RGBA", (N, N), (0, 0, 0, 0))
     dm = ImageDraw.Draw(marks)
     ink = (25, 25, 30, 230) if colour.mean() > 0.45 else (225, 225, 215, 220)
@@ -110,7 +110,7 @@ def shell_texture(bot, seed, colour=None, markings=True, second_panels=True):
     chips = Image.new("L", (N, N), 0)
     dc = ImageDraw.Draw(chips)
     spots = []
-    # chips gather where things get knocked: along panel edges and at corners, small, many only on worn droids
+    # chips gather where things get knocked: along panel edges and at corners, small, many only on worn bots
     edges = np.argwhere(line > 0.5)
     for _ in range(int(700 * wear ** 2)):
         if rng.random() < 0.75 and len(edges):

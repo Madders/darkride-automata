@@ -1,5 +1,5 @@
 //
-//  astro-hop.js (made from duck-hop.js and droid-shoot.js): photographs the astromech (arty) side-on through rocket
+//  astro-hop.js (made from duck-hop.js and bot-kinds-shoot.js): photographs the astromech (arty) side-on through rocket
 //  hops (run-tour.ps1 -Script) and checks they're flown, not jumped. Sends it to the lower end of the gallery ring's
 //  hop, then up it and back down, through the bots' command channel. Standing at the foot of a hop, its route starts
 //  with the hop: that first step was once walked, so viewers saw it vanish and reappear a floor up.

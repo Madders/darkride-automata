@@ -1,6 +1,6 @@
 //
-//  droid-shoot.js (made from photo-shoot.js): pictures of the newer droids (the astromech, the power droid, the mouse
-//  droid and the guide), to check their builds in a viewer (run-tour.ps1 -Script). Hides name plates and the toolbar,
+//  bot-kinds-shoot.js (made from photo-shoot.js): pictures of the newer kinds of bot (the astromech, the power bot, the
+//  mouse bot and the guide), to check their builds in a viewer (run-tour.ps1 -Script). Hides name plates and the toolbar,
 //  keeps the photographer's avatar out of the way, then takes several shots of each, from angles with a clear view;
 //  side-on ones of the astromech catch it leaning as it drives.
 //
@@ -65,7 +65,7 @@
             try { roster = Script.require(list[0].skeletonModelURL.replace(/[^\/]*$/, "") + "bots.json"); } catch (e) { log("no roster"); }
         }
         log(list.length + " bots: " + list.map(function (b) { return b.botId; }).join(", "));
-        // the new droids: several of each, side-on ones of the astromech to catch it leaning as it drives
+        // the new kinds: several of each, side-on ones of the astromech to catch it leaning as it drives
         [["arty", [90, -90, 60, -60, 30]], ["arty", [-90, 90, -60, 60]], ["arty", [90, -90, 120, -120]],
          ["arty", [35, -35, 70]], ["gonk", [35, -35, 70, -70]], ["gonk", [90, -90, 20]],
          ["skitter", [35, -35, 70, -70]], ["skitter", [90, -90, 10]], ["scout", [35, -35, 70]], ["scout", [-40, 40, 100]]

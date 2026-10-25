@@ -17,12 +17,15 @@ Beyond the walkers there are other kinds:
 - **A bouncer**: a big armoured sentry (ED-209 crossed with an ABC Warrior) that guards the door, watches people
   arrive, swivels its guns to follow them and challenges strangers in a slow, canned machine voice.
 - **A tour guide**: offers newcomers a tour, leads them round your world's sights and waits for stragglers.
-- **A mouse droid**: a little box that scurries along the walls and bolts, squealing, from anyone it doesn't know.
-- **A power droid**: a walking battery box on stubby legs that plods about honking.
+- **A mouse bot**: a little box that scurries along the walls and bolts, squealing, from anyone it doesn't know.
+- **A power bot**: a walking battery box on stubby legs that plods about honking.
 - **An astromech**: a domed barrel on three legs that rolls about, leaning back as it drives, and turns its dome
   to look at you.
 
 ![The bouncer by the door](examples/bouncer-in-world.jpg)
+
+On Darkride, each one can sign in to a **bot account** of its own, so visitors see its name, marked as a bot and
+"hosted by" you, instead of "anonymous". See [Giving a bot its own account](docs/adding-to-your-world.md#giving-a-bot-its-own-account).
 
 (Inside, the files still say "bot": `bots.json`, `duck-bot.js` and so on.)
 
@@ -31,7 +34,7 @@ Beyond the walkers there are other kinds:
 - **The runtime** (`bot/`): the script your domain runs for each bot (`duck-bot.js` loading `duck-brain.js`), the
   recorded walks and moves (`duck-cycles.json`), and the bots' voices (`sounds/`, synthesised beeps and chirps).
 - **A builder** (`tools/build_bots.py`): makes each one's model from a roster (`bots.json`): its body (walker,
-  bouncer, mouse droid, power droid, astromech), size, colours, wear, head shape, eyes, antennas, fins, crest, jaw,
+  bouncer, mouse bot, power bot, astromech), size, colours, wear, head shape, eyes, antennas, fins, crest, jaw,
   rocket pods, a guide's pennant; weathered textures with normal maps.
 - **A map builder** (`tools/build_nav.py`): makes the bots' walkable map of your world from its entities: floors on
   every level, stairs, walls, drops, rocket hops and things worth looking at.

@@ -3,9 +3,9 @@
 Each model is built from simple rounded parts: a torso shell, servo hubs with glowing rings at the joints, thighs,
 shins and flat feet, a neck column and a head, with a choice per bot of head (loaf, dome or wedge), eyes (lens, visor
 slit or twin lenses), antennas (0 to 2), back fins, a crest, a chest light, rocket pods, colours, weathering
-(weathering.py: Star Wars droid style, from factory-fresh to beaten up, by the bot's wear), and a jaw that opens
-while the bot makes a sound. Other bodies on the same skeleton: a bouncer (an armoured sentry), a mouse droid, a
-power droid and an astromech (style "build"). See docs/designing-bots.md.
+(weathering.py: in a used-future style, from factory-fresh to beaten up, by the bot's wear), and a jaw that opens
+while the bot makes a sound. Other bodies on the same skeleton: a bouncer (an armoured sentry), a mouse bot, a
+power bot and an astromech (style "build"). See docs/designing-bots.md.
 
 The parts are designed with the robot standing in its rest pose (the walk policy's default pose: from the skeleton
 and bot/duck-cycles.json) and carried onto each bone's bind pose, so every bot shares the skeleton, and the recorded
@@ -434,11 +434,11 @@ def design_bouncer(sk, style):
     return parts
 
 
-MOUSE_TOP = FLOOR + 0.25        # the mouse droid's height
+MOUSE_TOP = FLOOR + 0.25        # the mouse bot's height
 
 
 def design_mouse(sk, style):
-    """A mouse droid (an MSE-6 sort): a low boxy body skimming the floor, with the legs hidden in its skirt (they
+    """A mouse bot (an MSE-6 sort): a low boxy body skimming the floor, with the legs hidden in its skirt (they
     still walk, under there, which makes it jiggle along). Everything rides on Hips: no head to turn. A wedge nose
     with a bumper and a sensor eye, wheel housings, hinged top panels, a grille, stub antennas and a tail light."""
     parts = []
@@ -485,7 +485,7 @@ def cylinder(centre, axis, radius, height, sections=40):
 
 
 def design_power(sk, style):
-    """A power droid (the EG-6 "gonk" sort, like DN-LD): a tall box of a battery on two stubby legs. No lights to
+    """A power bot (the EG-6 "gonk" sort, like DN-LD): a tall box of a battery on two stubby legs. No lights to
     speak of: a small status lamp, vents, a control panel, side drums, a top hatch with handles, a power coupling. The
     box rides on Hips (it waddles as it walks); the legs below it are the duck's, made short and thick."""
     parts = []

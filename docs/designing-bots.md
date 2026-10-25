@@ -108,26 +108,26 @@ asks for one any time, and "no", "stop" or "go away" ends one.
 | `role` | `"guide"` |
 | `post`, `facing` | where it waits, and which way it faces there |
 | `tour` | the stops, in order: `{"at": [x, y, z] where it stands, "look": [x, y, z] what it shows, "say": "a line's name"}` (`at` must be on its map) |
-| `voice` | its lines, as for a bouncer; `"voiceStyle": "small"` makes them a little droid's (quicker, higher, tinnier) and `voicePitch` above 1 raises them |
+| `voice` | its lines, as for a bouncer; `"voiceStyle": "small"` makes them a little robot's (quicker, higher, tinnier) and `voicePitch` above 1 raises them |
 | `lines` | `offer` (a sequence, said when it offers), `again` (to someone it's shown round before), `follow` ("this way"), `wait` (calling a straggler), `end`, `lost`, `decline` (when they say no), `idle` (now and then at its post) |
 
 `"style": {"pennant": true}` gives any bot a tour guide's pennant on a pole. See the Madders Place roster's Scout.
 
-## Mouse droids
+## Mouse bots
 
-`"style": {"build": "mouse"}` builds a mouse droid instead of a walker: a low box (about 25 cm high at size 1) with a
+`"style": {"build": "mouse"}` builds a mouse bot instead of a walker: a low box (about 25 cm high at size 1) with a
 sloping nose, a bumper and a sensor eye, wheel housings, top panels, a grille and a tail light, its legs hidden
 inside its skirt (they still walk under there, which makes it jiggle along). It has no head to turn. Its brain
 changes with it: it scurries at well over twice a walker's pace, turns sharply, chatters (quick high bleeps) instead
 of chirping, hugs walls rather than peering over edges, never sits or rolls, and is always shy: it bolts with a
-squeal from a stranger who comes close, and only walks up to old friends. Give it `"climbs": false` (a mouse droid
+squeal from a stranger who comes close, and only walks up to old friends. Give it `"climbs": false` (a mouse bot
 can't do stairs) and `"antennas": 1` for a whip aerial.
 
-## Power droids and astromechs
+## Power bots and astromechs
 
 Two more bodies, both plain machines without neon (keep their `glow` low: it only lights a status lamp or two):
 
-- `"build": "power"`: a power droid (the EG-6 "gonk" sort): a tall battery box with a rounded top, a control panel,
+- `"build": "power"`: a power bot (the EG-6 "gonk" sort): a tall battery box with a rounded top, a control panel,
   vents, power drums on its sides and a coupling on its back, on short thick legs with big flat feet (the duck's legs,
   the thighs inside the box). It plods at about half a walker's pace, honks, and never rolls.
 - `"build": "astromech"`: an R-series astromech: a barrel body on two side legs and a middle one, its domed head on
@@ -160,9 +160,9 @@ ankle hubs, and glowing soles.
 shell: its colour with a little fade, panels with dark panel lines and grime gathered along them, some panels in its
 second paint (think R2-D2's blue), its unit number stencilled on, and by its `wear`: hazard stripes, paint chips
 along the panel edges (down to bare metal or primer), scratches, grime, scorch marks and rust streaks running down.
-Wear 0 is fresh from the factory; 0.5 a working droid; 0.9 has seen some things.
+Wear 0 is fresh from the factory; 0.5 a working bot; 0.9 has seen some things.
 
-Two more for the plainer droids: **bare metal** (an astromech's silver dome, a power droid's knobs and drums) and
+Two more for the plainer bots: **bare metal** (an astromech's silver dome, a power bot's knobs and drums) and
 **trim** (parts in the second paint, `paint2`), weathered the same way but without stencils. Each texture comes with
 a **normal map** (`bot-<id>-<part>-n.png`) made from the same panel lines, rivets, chips, scratches and dents, so they
 catch the light as real relief and nothing is flat-shaded. Only the parts a bot's body uses get painted.

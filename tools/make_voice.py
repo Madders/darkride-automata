@@ -45,7 +45,7 @@ def read(path):
 
 def machine(x, pitch, small=False):
     """A big machine's voice from a person's: slower and lower, ring-modulated, crunched, a radio's band, an echo.
-    small (a bot's "voiceStyle": "small"): a little droid's instead, quicker and higher, a lighter warble, a tinny
+    small (a bot's "voiceStyle": "small"): a little robot's instead, quicker and higher, a lighter warble, a tinny
     band and hardly any echo."""
     loud = np.nonzero(np.abs(x) > 0.02)[0]                                     # trim the engine's silence
     if len(loud):

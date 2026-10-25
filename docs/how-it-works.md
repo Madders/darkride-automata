@@ -137,9 +137,9 @@ waits at its post, walks over to offer a tour to anyone new who lingers nearby, 
 pausing to call them if they lag, giving up if they wander off, and saying its piece at each stop (its lines are
 spoken sounds, as a bouncer's). Spoken "tour" asks for one; "no", "stop" and "go away" end it.
 
-## Mouse droids
+## Mouse bots
 
-A bot built as a mouse droid (`"build": "mouse"`) runs the same brain with a few changes: it moves at 2.6 times the
+A bot built as a mouse bot (`"build": "mouse"`) runs the same brain with a few changes: it moves at 2.6 times the
 pace (its hidden legs' walk cycle sped up with it, so it jiggles), turns four times as fast, chatters instead of
 chirping, prefers walls to edges, never sits or rolls, and is always shy.
 
@@ -147,7 +147,7 @@ An astromech (`"build": "astromech"`) holds its neck still and turns only its do
 the idle cycle instead of stepping; driving, it stands as a tripod (its hips turn the side legs back about their ankle
 hinges while the feet, on the ankle bones, are held level and planted; the body on neck_pitch tilts back on the
 shoulders, bringing the middle leg's wheel forward), turns twice as fast, whistles, and spins its dome where another bot would sit or
-roll. A power droid (`"build": "power"`) plods at about half pace on its walk cycle, honks, and never rolls.
+roll. A power bot (`"build": "power"`) plods at about half pace on its walk cycle, honks, and never rolls.
 
 ## Rockets
 

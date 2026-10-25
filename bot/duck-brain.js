@@ -48,7 +48,7 @@
 //  walk about together. With the roster's "hearing" service running, memories are kept there (POST/GET /memory/<id>)
 //  and last across restarts.
 //
-//  A mouse droid ("style": {"build": "mouse"}): a little box on hidden legs that scurries about at speed, turns on a
+//  A mouse bot ("style": {"build": "mouse"}): a little box on hidden legs that scurries about at speed, turns on a
 //  sixpence, pauses to chatter at walls and corners, never sits or rolls, and bolts with a squeal from any stranger who
 //  comes near (it's shy whatever its personality says, unless they're an old friend).
 //
@@ -57,7 +57,7 @@
 //  hinges (feet flat, planted), the body tilts back on its shoulders (neck_pitch) and the middle leg's wheel comes
 //  forward under it for balance. It keeps the rest of its neck still and turns its whole dome to look at things, whistles and warbles, screams when
 //  startled, and instead of sitting or rolling spins its dome or rocks on the spot.
-//  A power droid ("build": "power", a gonk): it waddles slowly on its stubby legs, honks, and never rolls.
+//  A power bot ("build": "power", a gonk): it waddles slowly on its stubby legs, honks, and never rolls.
 //
 //  A bot with "role": "guide" (its own loader too) waits at its post by where visitors arrive. When someone new turns
 //  up and stays a moment it trundles over and offers a tour ("lines": "offer"); unless they say no, it leads them round
@@ -313,7 +313,7 @@
         ASTRO = !!(bot.style && bot.style.build === "astromech");
         POWER = !!(bot.style && bot.style.build === "power");
         if (MOUSE) { mind.shyness = Math.max(mind.shyness, 0.9); mind.energy = Math.max(mind.energy, 0.7); }
-        // a lively bot walks a little quicker; a mouse droid scurries, an astromech rolls along, a power droid plods
+        // a lively bot walks a little quicker; a mouse bot scurries, an astromech rolls along, a power bot plods
         PACE = (0.85 + 0.3 * mind.energy) * (MOUSE ? 2.6 : ASTRO ? 1.15 : POWER ? 0.55 : 1);
         log("personality " + JSON.stringify(mind).replace(/(\d\.\d\d)\d+/g, "$1"));
     }
@@ -453,7 +453,7 @@
         // a curious bot goes to look at things more than it just wanders
         var target = -1, then = null, why = "";
         var roll = Math.random() < 0.4 + 0.5 * mind.curiosity ? Math.random() * 0.72 : 0.72 + Math.random() * 0.28;
-        if (MOUSE && roll < 0.42) roll = 0.3;                         // a mouse droid hugs walls, never peers over
+        if (MOUSE && roll < 0.42) roll = 0.3;                         // a mouse bot hugs walls, never peers over
         if (roll < 0.25) {                                            // peer over an edge
             target = pickCell(function (i) { return isEdge(i); });
             then = { name: "peer" }; why = "an edge";

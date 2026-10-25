@@ -42,7 +42,9 @@ per bot. Keep them that way.
 
 ## No display names
 A scripted avatar without an account can't set a display name (the engine uses the account's): visitors see
-"anonymous". Their looks tell them apart.
+"anonymous". On Darkride, give each bot a bot account of its own (see
+[Giving a bot its own account](adding-to-your-world.md#giving-a-bot-its-own-account)): it's then shown by its
+account's username, marked as a bot. Without one, their looks tell them apart.
 
 ## A domain entity parented to a bot never shows up
 The entity server can't place an entity whose parent is an avatar, so visitors never get it. The rocket flame is a
