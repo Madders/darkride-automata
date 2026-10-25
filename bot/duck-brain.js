@@ -20,11 +20,12 @@
 //  Its head is its own (look-at), blended over the walk cycle. ES5 only (the engine's script engine).
 //
 //  Bots (bots.json, build_bots.py): each copy of this script takes the first bot on the roster that isn't already
-//  about (they announce themselves on a message channel) and becomes it: its model, its size (the gait slows or
+//  about (they announce themselves on a message channel), or the one its loader names (bot-<id>.js sets BOT_ID; a
+//  copy that claimed that bot gives way to it), and becomes it: its model, its size (the gait slows or
 //  quickens with size, as a real one's would: speed with the square root of size), whether it climbs stairs, a home
 //  area it keeps to, and rockets in its feet for some (hopping up to and down from upper floors at the rocket hops).
-//  A scripted avatar without an account has no display name: its looks tell it apart. An AI resident (a bot whose
-//  assignment client signs in with its account's connection key, docs/adding-to-your-world.md) is named by its
+//  A scripted avatar without an account has no display name: its looks tell it apart. A bot with an account (its
+//  assignment client signs in with the account's connection key, docs/adding-to-your-world.md) is named by its
 //  account, whatever that's called: the bot is still the roster's (BOT_ID, or the one it claimed), and is called by
 //  its roster name in voice commands. While its words are being recognised it says it's busy on the residents' channel,
 //  so its nametag's mark turns.
@@ -552,7 +553,7 @@
         };
         xhr.send(all.buffer);
     }
-    // an AI resident's nametag mark turns while it's busy (at most 15 s); clients ignore it from a bot without an account
+    // a signed-in bot's nametag mark turns while it's busy (at most 15 s); clients ignore it from a bot without an account
     function thinking(busy) {
         Messages.sendMessage(RESIDENT_CHANNEL, JSON.stringify(busy ? { busy: true } : { done: true }));
     }
@@ -1156,7 +1157,8 @@
     var CHANNEL = "darkride.bots", heard = {};     // or the roster's own "channel", so two kits in one domain don't mix
     var RESIDENT_CHANNEL = "tivoli.ai-resident", shownAs = "";
     function announce() {
-        if (bot) Messages.sendMessage(CHANNEL, JSON.stringify({ bot: bot.id, session: String(Agent.sessionUUID) }));
+        if (bot) Messages.sendMessage(CHANNEL, JSON.stringify({ bot: bot.id, session: String(Agent.sessionUUID),
+                                                           own: typeof BOT_ID !== "undefined" }));
         if (bot && Avatar.displayName && Avatar.displayName !== shownAs) {     // signed in: the account's name
             shownAs = Avatar.displayName;
             log("signed in: shown as \"" + shownAs + "\" (still " + bot.name + ")");
@@ -1172,7 +1174,7 @@
             if (channel !== CHANNEL) return;
             try {
                 var m = JSON.parse(message);
-                if (m.session !== String(Agent.sessionUUID)) heard[m.session] = { bot: m.bot, at: Date.now() };
+                if (m.session !== String(Agent.sessionUUID)) heard[m.session] = { bot: m.bot, at: Date.now(), own: !!m.own };
             } catch (e) { /* not ours */ }
         });
     }
@@ -1211,11 +1213,12 @@
         for (var i = 0; i < free.length; i++) if (!taken[free[i].id]) return free[i];
         return pick(free);                        // more copies than bots: double up
     }
-    // two copies that picked the same bot at once: the one with the higher session id picks again
+    // two copies that picked the same bot at once: the one with the higher session id picks again; and a copy that
+    // claimed a bot always gives way to that bot's own loader (one with an account, say, started after it)
     function checkClaim() {
         if (typeof BOT_ID !== "undefined") return;
-        var other = botsAbout()[bot.id];
-        if (other && String(other) < String(Agent.sessionUUID)) {
+        var other = botsAbout()[bot.id], h = other && heard[String(other)];
+        if (other && ((h && h.own) || String(other) < String(Agent.sessionUUID))) {
             log("someone else is " + bot.name + "; picking again");
             become(claim());
         }

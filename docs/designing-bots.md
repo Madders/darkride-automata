@@ -77,7 +77,7 @@ roster has `hearing`; without it they last until the bot restarts.
 ## Bouncers, guides and other roles
 
 A bot with a `role` doesn't wander and isn't taken by the wandering copies: it runs from its own persistent script,
-`bot-<id>.js` (build_bots.py writes it), one instance. A `"bouncer"` guards a post, watches
+`bot-<id>.js` (build_bots.py writes one for every bot), one instance. A `"bouncer"` guards a post, watches
 everyone within 15 m, swivels to follow them and turns to face anyone well off to the side, challenges arrivals
 within 12 m, answers anyone who talks to it, shifts its feet and mutters now and then.
 

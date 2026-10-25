@@ -54,7 +54,8 @@ referenced relative to `duck-bot.js`.
 
 In the domain's admin pages, **Content > Scripts > Persistent Scripts**: add the URL of `duck-bot.js`, with **one
 instance per wandering bot**, and for each bot with a role (a bouncer, a guide) its own `bot-<id>.js` with one instance; save
-(the domain restarts). Speaking bots' lines are made on Windows by package.py (tools/make_voice.py). Then:
+(the domain restarts). Every bot has a `bot-<id>.js`, so a wanderer can run from its own too (it must, with an account
+of its own: "Giving a bot its own account" below). Speaking bots' lines are made on Windows by package.py (tools/make_voice.py). Then:
 
 - **Assignment clients**: each bot needs one of its own, beside the mixers. Start the domain's assignment-client
   monitor with room: `assignment-client --min 6 --max 20` (or `-n`), or run extra agent-only clients
@@ -88,38 +89,43 @@ machine's public IP to **Security > Assignment Client IP address Whitelist**, an
 say `bots`; on the machine, run `assignment-client -t 2 --pool bots -a <domain address> -n 10`. If that machine or
 its internet goes down, the bots leave; and with a changing IP, the whitelist needs updating.
 
-## Making a bot an AI resident
+## Giving a bot its own account
 
-On Darkride, a bot can sign in to its own account on the metaverse (vr.darkride.ai) as an **AI resident**. It then
-has a name in the People list, and its nametag reads its name with the AI mark and "hosted by" you, instead of
-"anonymous". The bot is the same; only its body's assignment client changes.
+On Darkride, a bot can sign in to an account of its own on the metaverse (vr.darkride.ai). Register it as a **bot
+account**: the bots here run on scripted logic, not AI. It then has a name in the People list, and its nametag shows
+that name marked as a bot and "hosted by" you, instead of "anonymous". The bot itself doesn't change; only how its
+body's assignment client is started does.
 
-1. **The account.** At vr.darkride.ai/user/residents, register the resident (its username is the name everyone sees)
-   and make its **connection key**. Treat the key like a password.
-2. **Its own assignment client**, in a pool of its own, with the account in its environment:
+1. **The account.** On vr.darkride.ai, register the bot (its username, 4-16 letters, digits or `_`, is the name
+   everyone sees) and make its **connection key** (`tvk_...`). Treat the key like a password.
+2. **Its own assignment client**, in a pool named after its username, with the account in its environment:
    ```
    HIFI_AC_USERNAME=<username>  HIFI_AC_KEY=<key>  HIFI_METAVERSE_URL=https://vr.darkride.ai
-   assignment-client -t 2 --pool resident-<id> -a <domain address>
+   assignment-client -t 2 --pool <username> -a <domain address> --server-port <domain port, 40102 by default>
    ```
-   - **One process, no `-n` or `--min`/`--max`**: forked children would all be the same resident.
-   - Keep the key in an env file only that process reads (Docker `--env-file`, root-only, mode 600). Never put it in a
-     script, in git, or in a compose file's shared `environment:`. The engine takes it out of its environment once it
-     has signed in.
-   - The pool keeps every other script off this client: without it, the domain could hand it any script, which would
-     then run signed in as the resident.
-3. **Its script.** In the domain's **Settings > Scripts > Persistent Scripts**, move the bot's row (its own loader,
-   `bot-<id>.js`, which sets `BOT_ID`) to the pool `resident-<id>`. A bot that claims its identity from the roster
-   (plain `duck-bot.js`) can't be a resident: give it a loader first (copy `bot-scout.js`, change the id).
-4. **Check** the client's log: "Signing in to https://vr.darkride.ai as the AI resident …", then "Signed in as …", and
-   the brain's "signed in: shown as "<username>" (still <bot name>)". A refused key logs the metaverse's reason
-   (paused by its host, and so on), and the bot then runs as before, anonymous.
+   - **One process per bot, no `-n` or `--min`/`--max`**: every child would sign in as the same account.
+   - Keep the key in an env file that only this process reads (Docker `--env-file`, owned by root, mode 600). Never
+     put it in a script, in git, in a compose file's shared `environment:`, on a command line or in a log. The engine
+     takes it out of its own environment once it has signed in.
+   - The pool keeps every other script off this client: without it, the domain could hand it another bot's script,
+     which would then run under this bot's name.
+3. **Its script.** In the domain's **Settings > Scripts > Persistent Scripts**, give the bot a row of its own: its
+   loader `bot-<id>.js` (the builder writes one for every bot on the roster; it sets `BOT_ID`), one instance, in the
+   pool `<username>`. Take one instance off the plain `duck-bot.js` row for each bot you move.
+4. **Check** the client's log: "Signing in to https://vr.darkride.ai as …", then "Signed in as …", and the brain's
+   "signed in: shown as "<username>" (still <bot name>)". A refused key logs the metaverse's reason (the account
+   paused by its host, and so on), and the bot then runs as before, anonymous.
 
-What changes in the brain: nothing you need to set. It's still the roster's bot (`BOT_ID`), whatever the account is
-called (say "scout-madders" if "scout" was taken), and visitors still call it by its roster name in voice commands
-("Scout, follow me"): the speech service listens for the roster's names. While it waits for what it heard to be
-recognised it sends `{busy: true}`, then `{done: true}`, on the Messages channel `tivoli.ai-resident`, so its mark
-turns as it "thinks". Without an account (a plain client in the pool, or no key) it runs exactly as before. Each
-resident is one more assignment client: about 110 MB of memory.
+What the brain does about it: nothing you need to set. Who the bot is comes from its loader (`BOT_ID`), never from the
+account, so the username can be anything ("madders_scout" for Scout). Visitors still call it by its roster name in
+voice commands ("Scout, follow me"), because the speech service listens for the roster's names. If a plain
+`duck-bot.js` copy had already taken that bot (the domain started it first), the copy gives way to the loader and
+becomes another bot. While it waits for what it heard to be recognised, it sends `{busy: true}`, then `{done: true}`,
+on the Messages channel `tivoli.ai-resident`, which a nametag that has a mark uses to animate it. Without an account (a
+plain client in the pool, or no key) it runs exactly as before.
+
+A bot with an account costs what it did as a child of a shared client (below): the shared client's children are
+separate processes already, so moving a bot to its own client adds only that client's few MB of start-up.
 
 ## What they cost
 

@@ -849,12 +849,12 @@ def main():
             (out / textures[name][1]).write_bytes(normal)
         tris = write(out / ("duck-%s.glb" % bot["id"]), sk, parts, materials(bot), textures)
         write_fst(out, bot, joints)
-        if bot.get("role"):
-            # a bot with a role (a bouncer) runs from its own persistent script, which names it
-            loader = ["//", "//  bot-%s.js: %s's own persistent script (darkride-automata): the brain, as this bot (%s)."
-                      % (bot["id"], bot["name"], bot["role"]), "//", "var BOT_ID = %s;" % json.dumps(bot["id"]),
-                      'Script.include(Script.resolvePath("duck-brain.js"));', ""]
-            (out / ("bot-%s.js" % bot["id"])).write_text("\n".join(loader), encoding="utf-8")
+        # every bot gets its own persistent script, which names it: a bot with a role must run from it, and so must a
+        # bot with an account (its own assignment client takes only its own script); the rest may use duck-bot.js
+        loader = ["//", "//  bot-%s.js: %s's own persistent script (darkride-automata): the brain, as this bot%s."
+                  % (bot["id"], bot["name"], " (%s)" % bot["role"] if bot.get("role") else ""), "//",
+                  "var BOT_ID = %s;" % json.dumps(bot["id"]), 'Script.include(Script.resolvePath("duck-brain.js"));', ""]
+        (out / ("bot-%s.js" % bot["id"])).write_text("\n".join(loader), encoding="utf-8")
         print("%-8s %-8s size %.2f wear %.2f  %s  %d triangles" % (bot["id"], bot["name"], bot.get("size", 1),
               bot.get("wear", 0.3), json.dumps(bot.get("style", {})), tris))
     (out / "bots.json").write_text(json.dumps(roster, indent=1), encoding="utf-8")       # as given, without the defaults
