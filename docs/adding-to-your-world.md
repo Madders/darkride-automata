@@ -106,13 +106,18 @@ body's assignment client is started does.
    ```
    - **One process per bot, no `-n` or `--min`/`--max`**: every child would sign in as the same account.
    - Keep the key in an env file that only this process reads (Docker `--env-file`, owned by root, mode 600). Never
-     put it in a script, in git, in a compose file's shared `environment:`, on a command line or in a log. The engine
-     takes it out of its own environment once it has signed in.
+     put it in a script, in git, in a compose file's shared `environment:`, on a command line or in a log. It is
+     still readable by root on that machine: `docker inspect` shows a container's environment, and some engine builds
+     leave it in the running process's environment too, so keep root on the bots' host to yourself.
    - The pool keeps every other script off this client: without it, the domain could hand it another bot's script,
      which would then run under this bot's name.
-3. **Its script.** In the domain's **Settings > Scripts > Persistent Scripts**, give the bot a row of its own: its
+3. **Its script.** In the domain's **Settings > Scripts > Persistent Scripts**, the bot needs exactly one row: its
    loader `bot-<id>.js` (the builder writes one for every bot on the roster; it sets `BOT_ID`), one instance, in the
-   pool `<username>`. Take one instance off the plain `duck-bot.js` row for each bot you move.
+   pool `<username>`. Move rows, don't add them:
+   - If the bot already has a row of its own (its loader in another pool), change that row's pool to `<username>`.
+     A second row would start a second copy of the same bot, and nothing settles which one stays.
+   - If it ran as one of the plain `duck-bot.js` instances, add its loader row and take one instance off the
+     `duck-bot.js` row. A spare `duck-bot.js` copy would keep picking a bot whose loader then sends it away.
 4. **Check** the client's log: "Signing in to https://vr.darkride.ai as …", then "Signed in as …", and the brain's
    "signed in: shown as "<username>" (still <bot name>)". A refused key logs the metaverse's reason (the account
    paused by its host, and so on), and the bot then runs as before, anonymous.
