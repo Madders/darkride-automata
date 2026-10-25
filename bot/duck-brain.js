@@ -23,7 +23,11 @@
 //  about (they announce themselves on a message channel) and becomes it: its model, its size (the gait slows or
 //  quickens with size, as a real one's would: speed with the square root of size), whether it climbs stairs, a home
 //  area it keeps to, and rockets in its feet for some (hopping up to and down from upper floors at the rocket hops).
-//  A scripted avatar without an account has no display name: its looks tell it apart.
+//  A scripted avatar without an account has no display name: its looks tell it apart. An AI resident (a bot whose
+//  assignment client signs in with its account's connection key, docs/adding-to-your-world.md) is named by its
+//  account, whatever that's called: the bot is still the roster's (BOT_ID, or the one it claimed), and is called by
+//  its roster name in voice commands. While its words are being recognised it says it's busy on the residents' channel,
+//  so its nametag's mark turns.
 //
 //  Voice commands (the roster's "hearing": a URL of tools/hearing.py): the bot nearest a talking visitor keeps what it
 //  hears and, when they pause, has it recognised; what was said goes out on the command channel, and the bot named
@@ -534,8 +538,10 @@
         heardChunks = [];
         var xhr = new XMLHttpRequest();
         xhr.open("POST", roster.hearing, true);
+        thinking(true);
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4) return;
+            thinking(false);
             var text = "";
             try { text = JSON.parse(xhr.responseText).text || ""; } catch (e) { /* no answer */ }
             var act = commandIn(text);
@@ -545,6 +551,10 @@
                                                                      speaker: who }));
         };
         xhr.send(all.buffer);
+    }
+    // an AI resident's nametag mark turns while it's busy (at most 15 s); clients ignore it from a bot without an account
+    function thinking(busy) {
+        Messages.sendMessage(RESIDENT_CHANNEL, JSON.stringify(busy ? { busy: true } : { done: true }));
     }
     // what was said, as {act, bot}: the first command word, and a bot's name if one was said
     var WORDS = { tour: "tour", yes: "yes", okay: "yes", sure: "yes",
@@ -1144,8 +1154,13 @@
     // the bots others already are, with the session of each: from what they announce on the bots' channel every few
     // seconds (reliable), and from the models they wear (which the avatar mixer doesn't always pass on)
     var CHANNEL = "darkride.bots", heard = {};     // or the roster's own "channel", so two kits in one domain don't mix
+    var RESIDENT_CHANNEL = "tivoli.ai-resident", shownAs = "";
     function announce() {
         if (bot) Messages.sendMessage(CHANNEL, JSON.stringify({ bot: bot.id, session: String(Agent.sessionUUID) }));
+        if (bot && Avatar.displayName && Avatar.displayName !== shownAs) {     // signed in: the account's name
+            shownAs = Avatar.displayName;
+            log("signed in: shown as \"" + shownAs + "\" (still " + bot.name + ")");
+        }
     }
     function listenToBots() {                     // once the agent has its mixers (subscribing earlier lost agents)
         var r = Script.require(BASE + "bots.json");
@@ -1208,7 +1223,7 @@
     function become(b) {
         bot = b; SIZE = b.size || 1; GAIT = Math.sqrt(SIZE);
         area = b.home ? roster.areas[b.home] : null;
-        Avatar.displayName = b.name;
+        Avatar.displayName = b.name;              // for an engine that lets an anonymous agent name itself; signed in, the account's name wins
         Avatar.skeletonModelURL = BASE + "duck-" + b.id + ".fst";
         order = null; rotations = [];
         // hatch: its home area's spot, or somewhere open in its home area, or in the roster's hatching area, or anywhere

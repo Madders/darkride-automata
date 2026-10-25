@@ -88,6 +88,39 @@ machine's public IP to **Security > Assignment Client IP address Whitelist**, an
 say `bots`; on the machine, run `assignment-client -t 2 --pool bots -a <domain address> -n 10`. If that machine or
 its internet goes down, the bots leave; and with a changing IP, the whitelist needs updating.
 
+## Making a bot an AI resident
+
+On Darkride, a bot can sign in to its own account on the metaverse (vr.darkride.ai) as an **AI resident**. It then
+has a name in the People list, and its nametag reads its name with the AI mark and "hosted by" you, instead of
+"anonymous". The bot is the same; only its body's assignment client changes.
+
+1. **The account.** At vr.darkride.ai/user/residents, register the resident (its username is the name everyone sees)
+   and make its **connection key**. Treat the key like a password.
+2. **Its own assignment client**, in a pool of its own, with the account in its environment:
+   ```
+   HIFI_AC_USERNAME=<username>  HIFI_AC_KEY=<key>  HIFI_METAVERSE_URL=https://vr.darkride.ai
+   assignment-client -t 2 --pool resident-<id> -a <domain address>
+   ```
+   - **One process, no `-n` or `--min`/`--max`**: forked children would all be the same resident.
+   - Keep the key in an env file only that process reads (Docker `--env-file`, root-only, mode 600). Never put it in a
+     script, in git, or in a compose file's shared `environment:`. The engine takes it out of its environment once it
+     has signed in.
+   - The pool keeps every other script off this client: without it, the domain could hand it any script, which would
+     then run signed in as the resident.
+3. **Its script.** In the domain's **Settings > Scripts > Persistent Scripts**, move the bot's row (its own loader,
+   `bot-<id>.js`, which sets `BOT_ID`) to the pool `resident-<id>`. A bot that claims its identity from the roster
+   (plain `duck-bot.js`) can't be a resident: give it a loader first (copy `bot-scout.js`, change the id).
+4. **Check** the client's log: "Signing in to https://vr.darkride.ai as the AI resident …", then "Signed in as …", and
+   the brain's "signed in: shown as "<username>" (still <bot name>)". A refused key logs the metaverse's reason
+   (paused by its host, and so on), and the bot then runs as before, anonymous.
+
+What changes in the brain: nothing you need to set. It's still the roster's bot (`BOT_ID`), whatever the account is
+called (say "scout-madders" if "scout" was taken), and visitors still call it by its roster name in voice commands
+("Scout, follow me"): the speech service listens for the roster's names. While it waits for what it heard to be
+recognised it sends `{busy: true}`, then `{done: true}`, on the Messages channel `tivoli.ai-resident`, so its mark
+turns as it "thinks". Without an account (a plain client in the pool, or no key) it runs exactly as before. Each
+resident is one more assignment client: about 110 MB of memory.
+
 ## What they cost
 
 Each bot is one assignment client: about **110 MB of memory and 5% of one CPU core** (30 updates a second), plus a
