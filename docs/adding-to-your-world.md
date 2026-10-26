@@ -151,9 +151,12 @@ python tools/manage.py --config manager.json restart|stop|start <id>
   "uptime_s", "docker"}, "signed_in"}]}`, where `docker` is docker's own word for the state (restarting, paused...).
   `signed_in` comes from the first 10 minutes of this run's log: "Signed in as" is true, a refused key false, neither
   null; a bot that isn't running is false. Without `--json`, a table.
-- `stop <id>` takes a bot offline: marks it `off` in the accounts file (and the roster, if the config names one), then
-  stops its container. `start <id>` takes the `off` away and starts it again, or makes it. `restart <id>` restarts a
-  bot that isn't off. Each prints one line, `{"ok": true|false, "message": "..."}`, and exits 0 when ok.
+- `stop <id>` takes a bot offline: stops its container, then marks it `off` in the accounts file (and the roster, if
+  the config names one and has the bot). `start <id>` takes the `off` away and starts it again, or makes it. `restart <id>` restarts a
+  bot that isn't off. Each prints one line, `{"ok": true|false, "message": "..."}`, and exits 0 when ok. If docker
+  can't stop it, nothing is marked; if the marking fails afterwards, the message says what was done.
+- The actions take turns (a lock, `.manager.lock` beside the config), so two clicks at once can't write the accounts
+  file or the roster over each other.
 - It never opens a key file or prints a key, and asks docker only for a container's state, never its full
   `docker inspect` (which shows the environment).
 - The roster's `off` is the copy on that machine: the copy on your asset server only changes when you upload it.
@@ -168,13 +171,17 @@ python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json status
 python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json restart|stop|start <id>
 ```
 The commands are only those: `status [--json]` and `restart`, `stop` or `start <id>`, where an id is lower-case
-letters, digits, `_` and `-`. Anything else is refused before docker or ssh is touched.
+letters, digits, `_` and `-`, starting with a letter or digit. Anything else is refused before docker or ssh is
+touched. (`resident.sh` itself takes only lower-case letters and digits in an id, so keep the ids to those.)
 
 **From another machine** (a dashboard on the LAN): give the dashboard an ssh key of its own whose `authorized_keys`
-line on the bots' host runs only the manager:
+line on the bots' host runs only the manager, only from the dashboard's machine:
 ```
-command="python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json --ssh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... dashboard
+from="<the dashboard's address>",restrict,command="python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json --ssh" ssh-ed25519 AAAA... dashboard
 ```
+`restrict` (OpenSSH 7.2+) turns off forwarding, the pty and anything added later. The command runs as the user whose
+`authorized_keys` it is, which must be able to write the accounts file and run docker and `resident.sh start`: on
+the bots' host, root's.
 With `--ssh` it takes the command from `SSH_ORIGINAL_COMMAND` and allows only `status --json` and `restart`, `stop`
 or `start <id>`. The dashboard's own config is `{"backend": "ssh", "ssh": {"host": "...", "user": "...", "key":
 "dashboard-key"}}`, and the same command lines then run there. `python tests/manage-test.py` checks the manager with a

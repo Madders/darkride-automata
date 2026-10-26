@@ -18,18 +18,22 @@ Everything about the host is in a config file (JSON; paths in it are relative to
 
 On the host, the ssh key's authorized_keys line runs this with --ssh, which takes the command from
 SSH_ORIGINAL_COMMAND and allows only the four below:
-    command="python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json --ssh",
-    no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... dashboard
+    from="<the dashboard's address>",restrict,
+    command="python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json --ssh" ssh-ed25519 AAAA... dashboard
+It runs as the user whose authorized_keys that is, which has to be one that can write the accounts file and run
+docker and the create command (root, on the bots' host).
 
 Usage: python manage.py --config <manager.json> status [--json]
        python manage.py --config <manager.json> restart|stop|start <id>
     status   each bot: id, name, username, enabled, its container's state and uptime, whether it's signed in
     restart  restarts a running or stopped bot's container (not one that's off: start it)
-    stop     takes it offline: marks it off, then stops its container (kept, so start brings it back as it was)
+    stop     takes it offline: stops its container (kept, so start brings it back as it was), then marks it off
     start    brings it back: takes the off away, then starts its container (or makes it with "create")
-The actions print one JSON line, {"ok": bool, "message": str}, and exit 0 when ok.
+The actions print one JSON line, {"ok": bool, "message": str}, and exit 0 when ok. They take turns: each holds
+.manager.lock beside the config while it runs, so two clicks at once can't write the files over each other.
 """
 import argparse
+import contextlib
 import datetime
 import json
 import os
@@ -38,8 +42,16 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
+import time
 
-ID = re.compile(r"^[a-z0-9_-]+$")
+try:
+    import fcntl
+except ImportError:                     # Windows, where the tests run
+    fcntl = None
+    import msvcrt
+
+ID = re.compile(r"[a-z0-9][a-z0-9_-]*")  # fullmatch: an id never starts with "-", so it can't pass for an option
 ACTIONS = ("restart", "stop", "start")
 TIMEOUT = 60                            # seconds for any one docker or ssh call
 SIGN_IN_WINDOW = datetime.timedelta(minutes=10)
@@ -103,14 +115,42 @@ def accounts(config):
 
 def write_over(path, text):
     """Replaces a file's text in one step, keeping its permissions."""
-    new = path.with_name(f".{path.name}.new")
-    new.write_bytes(text.encode("utf-8"))
+    handle, new = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
+        with os.fdopen(handle, "wb") as f:
+            f.write(text.encode("utf-8"))
         os.chmod(new, os.stat(path).st_mode & 0o7777)
         os.replace(new, path)
     except OSError:
-        new.unlink(missing_ok=True)
+        pathlib.Path(new).unlink(missing_ok=True)
         raise
+
+
+@contextlib.contextmanager
+def taking_turns(config):
+    """Holds .manager.lock beside the config for the length of an action, waiting for one that's running."""
+    with open(config["here"] / ".manager.lock", "a+b") as f:
+        give_up = time.monotonic() + TIMEOUT * 3
+        while True:
+            try:
+                if fcntl:
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                else:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError:
+                if time.monotonic() > give_up:
+                    raise Failed("another action is still running: try again in a minute")
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            if fcntl:
+                fcntl.flock(f, fcntl.LOCK_UN)
+            else:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def set_off_in_accounts(config, bot_id, off):
@@ -142,12 +182,14 @@ def roster_bots(config):
 
 
 def set_off_in_roster(config, bot_id, off):
-    """Changes only the bot's own "off" in its line, so the hand-kept layout stays as it is."""
+    """Changes only the bot's own "off" in its line, so the hand-kept layout stays as it is. A bot the roster
+    doesn't have is left alone."""
     path = config.get("roster")
     if not path or not path.exists():
         return False
     text = path.read_text(encoding="utf-8")
-    if bool(roster_bots(config).get(bot_id, {}).get("off")) == off:
+    bots = roster_bots(config)
+    if bot_id not in bots or bool(bots[bot_id].get("off")) == off:
         return False
     head = re.compile(r'(\{\s*"id"\s*:\s*"' + re.escape(bot_id) + r'"\s*,\s*)')
     if off:
@@ -188,7 +230,7 @@ def parse_time(stamp):
     m = re.match(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?(Z|[+-]\d\d:\d\d)$", stamp.strip())
     if not m:
         return None
-    frac = (m.group(2) or ".0")[:7]
+    frac = ((m.group(2) or ".") + "000000")[:7]    # before 3.11, fromisoformat takes only 3 or 6 digits
     zone = "+00:00" if m.group(3) == "Z" else m.group(3)
     return datetime.datetime.fromisoformat(m.group(1) + frac + zone)
 
@@ -217,8 +259,9 @@ def signed_in(config, name, username, started):
     if run.returncode:
         return None
     answer = None
+    me = re.compile(r"Signed in as\b.*(?<![A-Za-z0-9_])" + re.escape(username) + r"(?![A-Za-z0-9_])")
     for line in (run.stdout + run.stderr).splitlines():   # the lines are only looked at, never passed on
-        if "Signed in as" in line and username in line:
+        if me.search(line):
             answer = True
         elif "The connection key was refused" in line:
             answer = False
@@ -250,7 +293,7 @@ def status(config):
 
 
 def find(config, bot_id):
-    if not ID.match(bot_id or ""):
+    if not ID.fullmatch(bot_id or ""):
         raise Failed("a bot id is lower-case letters, digits, _ and -, as in the roster")
     for i, username, off in accounts(config):
         if i == bot_id:
@@ -270,14 +313,24 @@ def restart(config, bot_id):
 
 
 def stop(config, bot_id):
+    """Stops the container first: if that fails nothing has changed, and if the marking fails it says so."""
     username, off, name, state = find(config, bot_id)
-    marked = set_off_in_accounts(config, bot_id, True)
-    set_off_in_roster(config, bot_id, True)
-    note = "marked off" if marked else "already off"
-    if state == "running" or state in ("restarting", "paused"):
-        docker(config, "stop", name)
-        return f"{bot_id}: stopped, {note}"
-    return f"{bot_id}: wasn't running, {note}"
+    running = state in ("running", "restarting", "paused")
+    if running:
+        try:
+            docker(config, "stop", name)
+        except Failed as e:
+            raise Failed(f"{bot_id}: couldn't stop it, so it isn't marked off either ({e})")
+    did = "stopped" if running else "wasn't running"
+    try:
+        marked = set_off_in_accounts(config, bot_id, True)
+    except (Failed, OSError) as e:
+        raise Failed(f"{bot_id}: {did}, but couldn't mark it off, so starting all the bots brings it back: {e}")
+    try:
+        set_off_in_roster(config, bot_id, True)
+    except (Failed, OSError) as e:
+        raise Failed(f"{bot_id}: {did} and marked off in {config['accounts'].name}, but not in the roster: {e}")
+    return f"{bot_id}: {did}, " + ("marked off" if marked else "already off")
 
 
 def start(config, bot_id):
@@ -301,6 +354,11 @@ def start(config, bot_id):
     if run.returncode:
         raise Failed(f"{bot_id}: couldn't make its container: {said or f'exit {run.returncode}'}")
     return f"{bot_id}: container made and started" + (f" ({said})" if said else "")
+
+
+def act(config, action, bot_id):
+    with taking_turns(config):
+        return {"restart": restart, "stop": stop, "start": start}[action](config, bot_id)
 
 
 # over ssh
@@ -332,8 +390,11 @@ def over_ssh(config, words):
 
 def from_ssh():
     """The words of the command an ssh client asked for, if they're one this allows."""
-    words = shlex.split(os.environ.get("SSH_ORIGINAL_COMMAND", ""))
-    if words == ["status", "--json"] or len(words) == 2 and words[0] in ACTIONS and ID.match(words[1]):
+    try:
+        words = shlex.split(os.environ.get("SSH_ORIGINAL_COMMAND", ""))
+    except ValueError:                  # an unclosed quote, say
+        words = []
+    if words == ["status", "--json"] or len(words) == 2 and words[0] in ACTIONS and ID.fullmatch(words[1]):
         return words
     raise Failed("over ssh, only: status --json | restart|stop|start <id>")
 
@@ -351,13 +412,13 @@ def main(argv=None):
         if args.ssh:
             words = from_ssh()
         if not words or words[0] not in ("status",) + ACTIONS:
-            parser.error("a command: status [--json] | restart|stop|start <id>")
+            raise Failed("a command: status [--json] | restart|stop|start <id>")
         as_json = words[0] in ACTIONS or "--json" in words
         if words[0] in ACTIONS and len(words) != 2:
-            parser.error(f"{words[0]} <id>")
+            raise Failed(f"usage: {words[0]} <id>")
         if words[0] == "status" and len(words) > 1 + ("--json" in words):
-            parser.error("status [--json]")
-        if words[0] in ACTIONS and not ID.match(words[1]):          # before any docker or ssh
+            raise Failed("usage: status [--json]")
+        if words[0] in ACTIONS and not ID.fullmatch(words[1]):      # before any docker or ssh
             raise Failed("a bot id is lower-case letters, digits, _ and -, as in the roster")
         config = load_config(args.config)
         if config["backend"] == "ssh":
@@ -374,10 +435,9 @@ def main(argv=None):
             else:
                 print_table(result)
             return 0
-        message = {"restart": restart, "stop": stop, "start": start}[words[0]](config, words[1])
-        print(json.dumps({"ok": True, "message": message}))
+        print(json.dumps({"ok": True, "message": act(config, words[0], words[1])}))
         return 0
-    except Failed as e:
+    except (Failed, OSError, ValueError) as e:              # a file it can't write, say: still one JSON line
         if as_json:
             print(json.dumps({"ok": False, "message": secret_free(str(e))}))
         else:

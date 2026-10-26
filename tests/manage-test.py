@@ -6,6 +6,8 @@ files say afterwards, what docker was asked, and that a key beside the accounts 
 
 Usage: python tests/manage-test.py
 """
+import datetime
+import importlib.util
 import json
 import os
 import pathlib
@@ -44,6 +46,8 @@ elif args[0] in ("restart", "start", "stop"):
     c = state.get(args[1])
     if not c:
         sys.exit("Error response from daemon: No such container: " + args[1])
+    if c.get("stuck"):
+        sys.exit("Error response from daemon: cannot " + args[0] + " container: " + args[1])
     c["status"] = "exited" if args[0] == "stop" else "running"
     c["started"] = "2026-10-26T12:00:00.123456789Z" if args[0] != "stop" else c["started"]
     save()
@@ -61,6 +65,18 @@ state["resident-" + sys.argv[1]] = {"status": "running", "started": "2026-10-26T
 (here / "containers.json").write_text(json.dumps(state))
 print(sys.argv[1] + ": started as someone (pool someone)")
 print('watch for "Signed in as" with: resident.sh status ' + sys.argv[1])
+'''
+
+# two of these at once, each stopping and starting its own bot over and over, as two quick clicks on a dashboard
+RACE = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("manage", sys.argv[1])
+manage = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(manage)
+config = manage.load_config(sys.argv[2])
+for _ in range(int(sys.argv[4])):
+    manage.act(config, "stop", sys.argv[3])
+    manage.act(config, "start", sys.argv[3])
 '''
 
 # ssh: runs manage.py --ssh with the host's config, the remote command in SSH_ORIGINAL_COMMAND, as sshd would
@@ -96,6 +112,13 @@ CONTAINERS = {
                       "log": "The connection key was refused (the reason is in the line above)"},
     "automata": {"status": "running", "started": "2026-10-20T00:00:00Z", "log": ""},
 }
+
+
+def load_manage():
+    spec = importlib.util.spec_from_file_location("manage", MANAGE)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class Manage(unittest.TestCase):
@@ -143,6 +166,12 @@ class Manage(unittest.TestCase):
     def calls(self):
         return (self.dir / "calls.txt").read_text().splitlines()
 
+    def containers(self, **changes):
+        state = json.loads((self.dir / "containers.json").read_text())
+        for name, change in changes.items():
+            state.setdefault(name, {}).update(change)
+        (self.dir / "containers.json").write_text(json.dumps(state))
+
     def test_status(self):
         bots = self.bots()
         self.assertEqual(list(bots), ["scout", "bolt", "juno", "tank"])
@@ -160,6 +189,24 @@ class Manage(unittest.TestCase):
         self.assertFalse([c for c in self.calls() if c.startswith("inspect") and "--format" not in c])
         self.assertIn("logs --since 2026-10-26T11:15:02.500000+00:00 --until 2026-10-26T11:25:02.500000+00:00 "
                       "resident-scout", self.calls())
+
+    def test_parse_time(self):
+        utc = datetime.timezone.utc
+        parse = load_manage().parse_time
+        self.assertEqual(parse("0001-01-01T00:00:00Z"), datetime.datetime(1, 1, 1, tzinfo=utc))   # never started
+        self.assertEqual(parse("2026-10-26T11:15:02.5Z"), datetime.datetime(2026, 10, 26, 11, 15, 2, 500000, utc))
+        self.assertEqual(parse("2026-10-26T11:15:02.123456789+01:00"),
+                         datetime.datetime(2026, 10, 26, 10, 15, 2, 123456, utc))
+        self.assertIsNone(parse("yesterday"))
+
+    def test_status_of_a_container_never_started(self):
+        self.containers(**{"resident-tank": {"status": "created", "started": "0001-01-01T00:00:00Z", "log": ""}})
+        tank = self.bots()["tank"]
+        self.assertEqual(tank["container"], {"state": "exited", "uptime_s": None, "docker": "created"})
+
+    def test_signed_in_is_the_whole_username(self):
+        self.containers(**{"resident-scout": {"log": 'Signed in as "Bot_Scout2"'}})
+        self.assertIsNone(self.bots()["scout"]["signed_in"])
 
     def test_status_table(self):
         run = self.manage("status")
@@ -183,6 +230,45 @@ class Manage(unittest.TestCase):
         self.assertEqual(self.bots()["scout"]["container"]["state"], "exited")
         self.assertEqual(self.action("stop", "scout"), "scout: wasn't running, already off")
 
+    def test_stop_that_docker_refuses_changes_nothing(self):
+        self.containers(**{"resident-scout": {"stuck": True}})
+        self.assertIn("couldn't stop it, so it isn't marked off", self.action("stop", "scout", ok=False))
+        self.assertEqual((self.dir / "accounts").read_text(), ACCOUNTS)
+        self.assertEqual((self.dir / "bots.json").read_text(), ROSTER)
+
+    def test_stop_a_bot_the_roster_hasnt(self):
+        (self.dir / "accounts").write_text(ACCOUNTS + "kip     Bot_Kip\n")
+        self.containers(**{"resident-kip": {"status": "running", "started": "2026-10-26T11:16:00Z", "log": ""}})
+        self.assertEqual(self.action("stop", "kip"), "kip: stopped, marked off")
+        self.assertIn("kip     Bot_Kip off\n", (self.dir / "accounts").read_text())
+        self.assertEqual((self.dir / "bots.json").read_text(), ROSTER)
+
+    def test_stop_says_when_the_roster_cant_be_changed(self):
+        roster = ROSTER.replace('{"id": "juno", "name": "Juno"', '{"name": "Juno", "id": "juno"')
+        (self.dir / "bots.json").write_text(roster)
+        message = self.action("stop", "juno", ok=False)
+        self.assertIn("juno: stopped and marked off in accounts, but not in the roster", message)
+        self.assertIn("stop resident-juno", self.calls())
+        self.assertIn("juno    Bot_Juno off\n", (self.dir / "accounts").read_text())
+
+    def test_an_os_error_is_still_one_json_line(self):
+        (self.dir / ".manager.lock").mkdir()                    # can't be opened as the lock
+        self.assertTrue(self.action("start", "bolt", ok=False))
+        self.assertEqual((self.dir / "accounts").read_text(), ACCOUNTS)
+
+    def test_two_at_once_take_turns(self):
+        race = self.dir / "race.py"
+        race.write_text(RACE)
+        runs = [subprocess.Popen([sys.executable, str(race), str(MANAGE), str(self.config), bot, "15"],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                for bot in ("scout", "juno")]
+        for run in runs:
+            out, err = run.communicate(timeout=300)
+            self.assertEqual(run.returncode, 0, err)
+        self.assertEqual((self.dir / "accounts").read_text(), ACCOUNTS)
+        self.assertEqual((self.dir / "bots.json").read_text(), ROSTER)
+        self.assertEqual(sorted(f.name for f in self.dir.glob(".*")), [".manager.lock"])     # no temp files left
+
     def test_start_takes_off_away(self):
         self.assertEqual(self.action("start", "bolt"), "bolt: started")
         self.assertIn("bolt    Bot_Bolt   # resting\n", (self.dir / "accounts").read_text())
@@ -205,6 +291,9 @@ class Manage(unittest.TestCase):
         self.assertIn("isn't in", self.action("stop", "woody", ok=False))
         for bad in ("../x", "Scout", "a b", "x;y", ""):
             self.assertIn("lower-case", self.action("stop", bad, ok=False))
+        for bad in ("_bot", "scout\n"):                           # "-x" is refused over ssh, below
+            self.assertIn("lower-case", self.action("stop", bad, ok=False))
+        self.assertIn("usage: stop <id>", self.action("stop", ok=False))
         self.assertIn("isn't in", self.action("stop", "my_bot-2", ok=False))       # a good id, just not ours
         self.assertFalse((self.dir / "calls.txt").exists())
         self.assertEqual((self.dir / "accounts").read_text(), ACCOUNTS)
@@ -235,7 +324,8 @@ class Manage(unittest.TestCase):
         self.assertIn("is off", self.action("restart", "scout", config=client, ok=False))
 
     def test_ssh_allows_only_the_four(self):
-        for command in ("rm -rf /", "status", "stop scout; reboot", "logs resident-scout", "stop Scout"):
+        for command in ("rm -rf /", "status", "stop scout; reboot", "logs resident-scout", "stop Scout",
+                        "stop 'scout", "stop --json", "stop -x"):
             run = subprocess.run([sys.executable, str(MANAGE), "--config", str(self.config), "--ssh"],
                                  capture_output=True, text=True, env={**os.environ, "SSH_ORIGINAL_COMMAND": command})
             self.assertEqual(run.returncode, 1, command)
