@@ -75,8 +75,9 @@ met. A visitor met three or more times is an old friend: a trill and maybe a hap
 obeyed more readily. Someone who has scolded it more than praised it is avoided, and obeyed less. Two bots that have
 met three times are friends: they seek each other out, and a sociable one sometimes tags along with its friend for a
 minute. Company wears off, though: with two or more bots close by for a while, a bot goes off on its own for a few
-minutes, and none seeks out a guide or a bouncer at its post. Memories are kept by the bots' service (tools/hearing.py, `bots-memory.json` beside the roster) when the
-roster has `hearing`; without it they last until the bot restarts.
+minutes, and none seeks out a guide or a bouncer at its post. Memories are kept by the bots' service
+(tools/hearing.py, `bots-memory.json` beside the roster) when the roster has `hearing`; without it they last until the
+bot restarts.
 
 ## Bouncers, guides and other roles
 
@@ -105,8 +106,8 @@ metres and now and then facing `facing`; when someone new
 comes within 12 m and stays a few seconds, it trundles over and offers a tour, then leads them round its `tour` unless
 they say no. On the way it says "this way" now and then; if they fall more than 7 m behind it stops, turns and calls
 them, and if they're gone for 30 s it gives up ("lost"). At each stop it faces the sight and says its line; after the
-last, it says goodbye and goes back to its post to wait again. It offers each visitor a tour once in ten minutes; "tour" (spoken)
-asks for one any time, and "no", "stop" or "go away" ends one.
+last, it says goodbye and goes back to its post to wait again. It offers each visitor a tour once in ten minutes;
+"tour" (spoken) asks for one any time, and "no", "stop" or "go away" ends one.
 
 | field | what |
 |---|---|

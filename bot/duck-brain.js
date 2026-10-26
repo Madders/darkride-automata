@@ -445,7 +445,13 @@
             if (!f || !f.position || now > following.until) { following = null; say(f && f.position ? "trill" : "chirp", 0.5); }
             else {
                 // (a friend it can't reach, up stairs it can't climb, say: it gives up on the walk)
-                if (dist(f.position, me.pos) > 2.2 + SIZE) { if (!comeTo(f.position, { name: "idle" }) && following.buddy) following = null; }
+                // and a visitor it can't get to: it asks once, waits a little in case they come back down, then gives up
+                if (dist(f.position, me.pos) > 2.2 + SIZE) {
+                    if (comeTo(f.position, { name: "idle" }, following.lostSince)) following.lostSince = 0;
+                    else if (following.buddy) following = null;
+                    else if (!following.lostSince) following.lostSince = now;
+                    else if (now - following.lostSince > 15000) { following = null; say("sad", 0.5); }
+                }
                 else idle(1.5);
                 return;
             }
@@ -668,11 +674,11 @@
                                                         lookAt: Vec3.sum(at, { x: 0, y: 0.6, z: 0 }) } };
         }
     }
-    function comeTo(at, then) {
+    function comeTo(at, then, quiet) {
         var away = Vec3.normalize(Vec3.subtract(me.pos, at));
         var c = nearestCell(Vec3.sum(at, Vec3.multiply(0.8 + 0.5 * SIZE, away)), 1.5);
         if (allowed(c)) { goTo(c, then || { name: "greet", who: null }, "called"); return true; }
-        say("question");
+        if (!quiet) say("question");
         idle(rnd(1, 2));                          // (or it decides again straight away, and asks again)
         return false;
     }
@@ -1276,7 +1282,7 @@
         }
         var taken = botsAbout(), free = roster.bots.filter(function (x) { return !x.role && !x.off; });   // (off: out of the world)
         for (var i = 0; i < free.length; i++) if (!taken[free[i].id]) return free[i];
-        return pick(free);                        // more copies than bots: double up
+        return free.length ? pick(free) : null;   // more copies than bots: double up (none at all: every one off)
     }
     // two copies that picked the same bot at once: the one with the higher session id picks again; and a copy that
     // claimed a bot always gives way to that bot's own loader (one with an account, say, started after it)
@@ -1312,8 +1318,13 @@
                 var c = Math.floor(Math.random() * nav.cells.length);
                 if (allowed(c) && (area || inHatch(c)) && !isEdge(c) && !isWall(c) && nav.links[c].length === 8) start = c;
             }
+            if (start < 0) continue;              // no open cell found this time
             var r = findReach(start), n = r.filter(function (x) { return x; }).length;
             if (n > most) { most = n; best = start; bestReach = r; }
+        }
+        if (best < 0) {                           // nowhere open at all: any cell it's allowed on, or the first
+            for (var any = 0; any < nav.cells.length && best < 0; any++) if (allowed(any)) best = any;
+            best = Math.max(best, 0); bestReach = findReach(best); most = bestReach.filter(function (x) { return x; }).length;
         }
         start = best; reach = bestReach;
         log("can reach " + most + " cells (" + (Date.now() - t0) + " ms)");
@@ -1384,7 +1395,9 @@
             (columns[key] = columns[key] || []).push(i);
         }
         // copies start a few seconds apart, so each sees which bots the earlier ones became
-        become(claim());
+        var b = claim();
+        if (!b) { log("every wandering bot on the roster is off: nothing for this copy to be"); Script.stop(); return; }
+        become(b);
         Script.update.connect(update);
     }, 6000 + Math.random() * 9000);
     Script.scriptEnding.connect(function () {

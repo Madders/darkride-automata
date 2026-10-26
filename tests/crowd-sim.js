@@ -93,7 +93,8 @@ function makeAgent(n, botId) {
             include: function () {},
             setTimeout: function (fn, ms) { timers.push({ at: now + ms, fn: fn }); },
             update: { connect: function (fn) { me.update = fn; } },
-            scriptEnding: { connect: function () {} }
+            scriptEnding: { connect: function () {} },
+            stop: function () { me.update = null; }
         },
         Agent: { sessionUUID: me.session, isAvatar: false, avatarViewRadius: 0, isListeningToAudioStream: false,
                  get isPlayingAvatarSound() { return now < me.playingUntil; },

@@ -31,16 +31,17 @@ Run `duck-bot.js` with as many instances as you want bots. Each copy:
 
 1. joins the bots' message channel (`darkride.bots`, or the roster's `channel`) and listens a few seconds;
 2. loads the roster, the map and the motion;
-3. takes the **first bot on the roster nobody has announced** (leaving out bots marked `off`) (each bot announces itself every 8 seconds, and wears a
-   model named after it, so others can tell); if two pick the same one at once, the one with the higher session id
-   picks again;
+3. takes the **first bot on the roster nobody has announced**, leaving out bots marked `off` (each bot announces
+   itself every 8 seconds, and wears a model named after it, so others can tell); if two pick the same one at once,
+   the one with the higher session id picks again;
 4. wears that bot's model (`duck-<id>.fst`) and works out which cells of the map it can reach from where it hatches
    (its stairs rule, its rockets, its home area), so it never plans a route it can't take. A bot without a post or a
    hatching spot tries a few places at random and hatches at the one it can get furthest from: a bot that can't climb
    stairs, hatched on a raised patch with a step all round, would never leave it.
 
 A bot run from its own loader (`bot-<id>.js`) wears its model from the moment it starts, before it has loaded
-anything; without that, it shows as the engine's default avatar until it has. Copies start 6 to 15 seconds after the domain hands them out, a little apart, so most see the earlier ones' choices.
+anything; without that, it shows as the engine's default avatar until it has. Copies start 6 to 15 seconds after the
+domain hands them out, a little apart, so most see the earlier ones' choices.
 
 ## The map
 
@@ -60,8 +61,9 @@ walls a little.
 
 When it has nothing to do, a bot picks:
 - **a visitor** close by for a few seconds: walk up and say hello (a chirp, a nod), now and then;
-- **another bot** within 12 m: meet partway, face each other, trill and nod, every few minutes; but not a bot at
-  its post (a guide or a bouncer, which would draw every bot to it) or one that already has company;
+- **another bot** within 6 m plus 12 m times its sociability (up to 18 m): meet partway, face each other, trill and
+  nod, every few minutes; but not a bot at its post (a guide or a bouncer, which would draw every bot to it) or one
+  that already has company;
 - **a move on the spot** (about one time in five): peck at the ground, sit for a while, roll (only with room ahead),
   or kick;
 - **an edge**: walk to it, face the drop, lean out to peer over with an "oooh", look left and right, back away;
