@@ -28,7 +28,8 @@ Usage: python manage.py --config <manager.json> status [--json]
     status   each bot: id, name, username, enabled, its container's state and uptime, whether it's signed in
     restart  restarts a running or stopped bot's container (not one that's off: start it)
     stop     takes it offline: stops its container (kept, so start brings it back as it was), then marks it off
-    start    brings it back: takes the off away, then starts its container (or makes it with "create")
+    start    brings it back: takes the off away, then starts its container (or makes it with "create"); if
+             that fails, it stays marked on but isn't running, and starting all the bots brings it back
 The actions print one JSON line, {"ok": bool, "message": str}, and exit 0 when ok. They take turns: each holds
 .manager.lock beside the config while it runs, so two clicks at once can't write the files over each other.
 """
@@ -66,12 +67,60 @@ def secret_free(text):
     return re.sub(r"tvk_\S*", "tvk_...", text)
 
 
+def said(e):
+    """An error's words without the host's paths in them: a file is named by its base name only."""
+    if isinstance(e, OSError) and e.strerror:
+        return e.strerror + (f": {pathlib.Path(e.filename).name}" if e.filename else "")
+    return str(e)
+
+
+def is_words(value):
+    return isinstance(value, list) and value and all(isinstance(w, str) for w in value)
+
+
+def fills_in(template, what):
+    """Checks a template takes only {id} and {username}, so .format() can't fail mid-action."""
+    try:
+        template.format(id="x", username="x")
+    except (KeyError, IndexError, ValueError, AttributeError):
+        raise Failed(f"the config's {what} can fill in only {{id}} and {{username}}: {template!r}")
+
+
+def check_types(config):
+    """Every key the config has is the type it's used as, so a mistyped one fails here, not halfway through."""
+    if not isinstance(config, dict):
+        raise Failed("the config isn't a JSON object")
+    for key in ("accounts", "roster", "container", "backend"):
+        if key in config and not isinstance(config[key], str):
+            raise Failed(f"the config's {key} isn't a string")
+    for key in ("docker", "create"):
+        if key in config and not is_words(config[key]):
+            raise Failed(f"the config's {key} isn't a list of strings")
+    if "container" in config:
+        fills_in(config["container"], "container")
+    for part in config.get("create", []):
+        fills_in(part, "create")
+    s = config.get("ssh", {})
+    if not isinstance(s, dict):
+        raise Failed("the config's ssh isn't an object")
+    for key in ("host", "user", "key"):
+        if key in s and not isinstance(s[key], str):
+            raise Failed(f"the config's ssh {key} isn't a string")
+    for key in ("port", "connect_timeout"):
+        if key in s and (isinstance(s[key], bool) or not isinstance(s[key], (int, str))):
+            raise Failed(f"the config's ssh {key} isn't a number")
+    for key in ("command", "options"):
+        if key in s and not (is_words(s[key]) or key == "options" and s[key] == []):
+            raise Failed(f"the config's ssh {key} isn't a list of strings")
+
+
 def load_config(path):
     path = pathlib.Path(path).resolve()
     try:
         config = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        raise Failed(f"can't read the config {path}: {e}")
+        raise Failed(f"can't read the config {path.name}: {said(e)}")
+    check_types(config)
     here = path.parent
     for key in ("accounts", "roster"):
         if config.get(key):
@@ -101,7 +150,7 @@ def accounts(config):
     try:
         text = config["accounts"].read_text(encoding="utf-8")
     except OSError as e:
-        raise Failed(f"can't read the accounts file: {e}")
+        raise Failed(f"can't read the accounts file: {said(e)}")
     bots = []
     for n, line in enumerate(text.splitlines(), 1):
         if not line.split("#", 1)[0].strip():
@@ -178,7 +227,7 @@ def roster_bots(config):
     try:
         return {b["id"]: b for b in json.loads(path.read_text(encoding="utf-8")).get("bots", []) if "id" in b}
     except (OSError, ValueError) as e:
-        raise Failed(f"can't read the roster: {e}")
+        raise Failed(f"can't read the roster: {said(e)}")
 
 
 def set_off_in_roster(config, bot_id, off):
@@ -325,11 +374,11 @@ def stop(config, bot_id):
     try:
         marked = set_off_in_accounts(config, bot_id, True)
     except (Failed, OSError) as e:
-        raise Failed(f"{bot_id}: {did}, but couldn't mark it off, so starting all the bots brings it back: {e}")
+        raise Failed(f"{bot_id}: {did}, but couldn't mark it off, so starting all the bots brings it back: {said(e)}")
     try:
         set_off_in_roster(config, bot_id, True)
     except (Failed, OSError) as e:
-        raise Failed(f"{bot_id}: {did} and marked off in {config['accounts'].name}, but not in the roster: {e}")
+        raise Failed(f"{bot_id}: {did} and marked off in {config['accounts'].name}, but not in the roster: {said(e)}")
     return f"{bot_id}: {did}, " + ("marked off" if marked else "already off")
 
 
@@ -340,7 +389,10 @@ def start(config, bot_id):
     if state == "running":
         return f"{bot_id}: already running" + (", off taken away" if off else "")
     if state is not None:
-        docker(config, "start", name)
+        try:
+            docker(config, "start", name)
+        except Failed as e:
+            raise Failed(f"{bot_id}: off taken away, but couldn't start it ({e})")
         return f"{bot_id}: started"
     if not config.get("create"):
         raise Failed(f"{bot_id} has no container ({name}) and the config has no create command")
@@ -437,11 +489,13 @@ def main(argv=None):
             return 0
         print(json.dumps({"ok": True, "message": act(config, words[0], words[1])}))
         return 0
-    except (Failed, OSError, ValueError) as e:              # a file it can't write, say: still one JSON line
+    except (Failed, OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as e:
+        # a file it can't write, or something the checks missed: still one JSON line
+        message = said(e) if isinstance(e, (Failed, OSError, ValueError)) else f"{type(e).__name__}: {e}"
         if as_json:
-            print(json.dumps({"ok": False, "message": secret_free(str(e))}))
+            print(json.dumps({"ok": False, "message": secret_free(message)}))
         else:
-            print(secret_free(str(e)), file=sys.stderr)
+            print(secret_free(message), file=sys.stderr)
         return 1
 
 

@@ -307,6 +307,56 @@ class Manage(unittest.TestCase):
         self.assertEqual(json.loads(run.stdout),
                          {"ok": False, "message": "docker ps: Cannot connect to the Docker daemon"})
 
+    def test_badly_typed_configs_are_one_json_line(self):
+        good = json.loads(self.config.read_text())
+        bad = self.dir / "bad.json"
+        cases = [
+            ([], "isn't a JSON object"), (None, "isn't a JSON object"), ("x", "isn't a JSON object"),
+            ({**good, "ssh": "x"}, "ssh isn't an object"),
+            ({**good, "accounts": 5}, "accounts isn't a string"),
+            ({**good, "roster": ["bots.json"]}, "roster isn't a string"),
+            ({**good, "docker": "docker"}, "docker isn't a list of strings"),
+            ({**good, "docker": []}, "docker isn't a list of strings"),
+            ({**good, "container": "r-{bogus}"}, "container can fill in only"),
+            ({**good, "container": "r-{0}"}, "container can fill in only"),
+            ({**good, "container": "r-{id.x}"}, "container can fill in only"),
+            ({**good, "container": "r-{id"}, "container can fill in only"),
+            ({**good, "create": ["sh", "resident.sh", "start", "{nope}"]}, "create can fill in only"),
+            ({**good, "create": "resident.sh start"}, "create isn't a list of strings"),
+            ({**good, "backend": 1}, "backend isn't a string"),
+            ({"backend": "ssh", "ssh": {"host": 1}}, "ssh host isn't a string"),
+            ({"backend": "ssh", "ssh": {"host": "h", "port": [22]}}, "ssh port isn't a number"),
+            ({"backend": "ssh", "ssh": {"host": "h", "options": "x"}}, "ssh options isn't a list of strings"),
+            ({"backend": "ssh", "ssh": {"host": "h", "command": "ssh"}}, "ssh command isn't a list of strings"),
+        ]
+        for config, says in cases:
+            bad.write_text(json.dumps(config))
+            for args in (("status", "--json"), ("stop", "scout"), ("start", "tank")):
+                self.assertIn(says, self.action(*args, config=bad, ok=False), (config, args))
+            run = self.manage("status", config=bad)                   # the table: the error on stderr, no traceback
+            self.assertEqual(run.returncode, 1)
+            self.assertIn(says, run.stderr)
+            self.assertNotIn("Traceback", run.stderr)
+        self.assertFalse((self.dir / "calls.txt").exists())
+        self.assertEqual((self.dir / "accounts").read_text(), ACCOUNTS)
+
+    def test_errors_name_files_without_the_host_path(self):
+        missing = self.dir / "nowhere" / "manager.json"
+        message = self.action("status", "--json", config=missing, ok=False)
+        self.assertIn("manager.json", message)
+        self.assertNotIn(str(self.dir), message)
+        config = json.loads(self.config.read_text())
+        config["accounts"] = "no-such-accounts"
+        self.config.write_text(json.dumps(config))
+        message = self.action("stop", "scout", ok=False)
+        self.assertIn("no-such-accounts", message)
+        self.assertNotIn(str(self.dir), message)
+
+    def test_a_start_that_fails_says_off_was_taken_away(self):
+        self.containers(**{"resident-bolt": {"stuck": True}})
+        self.assertIn("bolt: off taken away, but couldn't start it", self.action("start", "bolt", ok=False))
+        self.assertIn("bolt    Bot_Bolt   # resting\n", (self.dir / "accounts").read_text())
+
     def test_bad_ids_never_reach_docker_or_ssh(self):
         client = self.dir / "client.json"
         client.write_text(json.dumps({"backend": "ssh", "ssh": {"host": "bots.lan", "command": ["no-such-ssh"]}}))

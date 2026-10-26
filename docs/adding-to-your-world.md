@@ -154,7 +154,11 @@ python tools/manage.py --config manager.json restart|stop|start <id>
 - `stop <id>` takes a bot offline: stops its container, then marks it `off` in the accounts file (and the roster, if
   the config names one and has the bot). `start <id>` takes the `off` away and starts it again, or makes it. `restart <id>` restarts a
   bot that isn't off. Each prints one line, `{"ok": true|false, "message": "..."}`, and exits 0 when ok. If docker
-  can't stop it, nothing is marked; if the marking fails afterwards, the message says what was done.
+  can't stop it, nothing is marked; if the marking fails afterwards, the message says what was done. `start` takes the
+  `off` away first, so a start that fails leaves the bot marked on but not running: starting all the bots brings it
+  back.
+- A config with a key of the wrong type (a string where a list goes, a `{placeholder}` other than `{id}` and
+  `{username}`) is refused with the same one JSON line before anything runs.
 - The actions take turns (a lock, `.manager.lock` beside the config), so two clicks at once can't write the accounts
   file or the roster over each other.
 - It never opens a key file or prints a key, and asks docker only for a container's state, never its full
