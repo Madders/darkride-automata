@@ -826,8 +826,8 @@ def main():
         print("updated the jaw in bot/duck-cycles.json")
     joints = viewer_joints(sk, skeleton_nodes(sk))
     for bot in roster["bots"]:
-        if wanted and bot["id"] not in wanted:
-            continue
+        if wanted and bot["id"] not in wanted or not wanted and bot.get("off"):
+            continue                    # (a bot marked off is built only when named: its last build stays as it was)
         seed = sum(ord(c) * 31 ** k for k, c in enumerate(bot["id"])) % 100000
         bot = dict(bot)
         bot.setdefault("unit", "%s-%02d" % (roster.get("unit_prefix", "DR"), seed % 97))

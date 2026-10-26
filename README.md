@@ -44,7 +44,8 @@ On Darkride, each one can sign in to a **bot account** of its own, so visitors s
 - **Ears and memory** (`tools/hearing.py`): a small offline speech service for spoken commands, which also keeps
   their memories.
 - **Tests** (`tests/`): scripts that photograph them, check their joints, make them talk and hop, give spoken
-  commands and take a tour.
+  commands, take a tour and watch how they bunch up (`crowd-watch.js`); and `crowd-sim.js`, which runs several brains
+  in Node with no domain at all (`node tests/crowd-sim.js <built roster folder>`), for a quick check of their choices.
 
 ## Quick start
 

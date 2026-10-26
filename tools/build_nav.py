@@ -8,6 +8,7 @@ about its registration point, rotated and moved, following parents), then on a g
   between them, at knee, mid, chest and handrail height, hit nothing: so thin walls, glass and railings still block;
 - tags an EDGE where a cell's neighbour drops away with nothing there (a ledge to peer over), and a WALL where a
   neighbour is blocked; leaves off ledges too narrow to stand on beside a drop;
+- tags a cell COVERED when there's something over it (a ceiling, a roof, an upper floor): indoors, roughly;
 - keeps the largest connected area, so bots never start somewhere they can't leave;
 - finds rocket hops (an upper floor's open edge above a floor reachable through clear air), for bots with rockets;
 - adds points of interest from the world config's rules (things for the bots to go and look at).
@@ -40,6 +41,7 @@ WORLD = OUT = CACHE = FBX2GLTF = None
 REGION = {"x": (-50.0, 50.0), "y": (-20.0, 30.0), "z": (-50.0, 50.0)}
 CELL = 0.25
 HEADROOM = 1.15      # the standard bot is about a metre tall
+COVER = 12.0         # a cell with anything above it within this height is under cover (inside)
 STEP = 0.32          # stairs rise about 0.2-0.25
 DROP = 0.6           # a fall worth peering over
 HOP = (1.2, 7.0)     # a rocket hop: how far up or down it goes (m)
@@ -206,6 +208,7 @@ def main():
     for (x, y, z), r, n in zip(locs, ray_ids, normals[:, 1]):
         columns.setdefault(r, []).append((y, n))
     cells = []                       # (ix, iz, height)
+    covered = set()                  # (ix, iz, height) of the cells with something over them
     for r, hits in columns.items():
         hits.sort(key=lambda h: -h[0])
         ix, iz = divmod(r, len(zs))
@@ -218,6 +221,8 @@ def main():
             if any(abs(c[2] - y) < 0.05 for c in cells[-3:] if c[0] == ix and c[1] == iz):
                 continue
             cells.append((int(ix), int(iz), round(float(y), 3)))
+            if above and min(above) - y < COVER:
+                covered.add(cells[-1])
     # one-cell holes (a doorway's threshold with no floor of its own, between the bridge and the office): bridge
     # them where floors on opposite sides line up and nothing in the column blocks the way
     occupied = {}
@@ -238,6 +243,8 @@ def main():
                 if any(h + 0.05 < hy < h + HEADROOM for hy, _ in hits):
                     continue
                 cells.append((gap[0], gap[1], round(h, 3)))
+                if any(h < hy < h + COVER for hy, _ in hits):
+                    covered.add(cells[-1])
                 occupied.setdefault(gap, []).append(h)
                 filled += 1
     print("walkable surfaces: %d (%d one-cell gaps bridged)" % (len(cells), filled))
@@ -327,14 +334,15 @@ def main():
         comp += 1
     keep = sorted(best)
     remap = {old: new for new, old in enumerate(keep)}
-    out_cells = [[cells[i][0], cells[i][1], cells[i][2], int(edge[i]) | (int(wall[i]) << 1)] for i in keep]
+    out_cells = [[cells[i][0], cells[i][1], cells[i][2], int(edge[i]) | (int(wall[i]) << 1) | (int(cells[i] in covered) << 2)]
+                 for i in keep]
     out_links = [[remap[j] for j in links[i] if j in remap] for i in keep]
     hops = find_hops(ray, cells, keep, edge, wall, drop_dirs, xs, zs)
     out_hops = [[remap[i], remap[j]] for i, j in hops]
     heights = [c[2] for c in out_cells]
-    print("kept %d cells (largest of %d areas), heights %.2f to %.2f, %d edge and %d wall cells"
+    print("kept %d cells (largest of %d areas), heights %.2f to %.2f, %d edge, %d wall and %d covered cells"
           % (len(keep), comp, min(heights), max(heights), sum(c[3] & 1 for c in out_cells),
-             sum(c[3] >> 1 & 1 for c in out_cells)))
+             sum(c[3] >> 1 & 1 for c in out_cells), sum(c[3] >> 2 & 1 for c in out_cells)))
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps({"cell": cell, "origin": [REGION["x"][0], REGION["z"][0]],
                                "cells": out_cells, "links": out_links, "hops": out_hops, "pois": pois()},

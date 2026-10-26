@@ -20,8 +20,8 @@
 //  Its head is its own (look-at), blended over the walk cycle. ES5 only (the engine's script engine).
 //
 //  Bots (bots.json, build_bots.py): each copy of this script takes the first bot on the roster that isn't already
-//  about (they announce themselves on a message channel), or the one its loader names (bot-<id>.js sets BOT_ID; a
-//  copy that claimed that bot gives way to it), and becomes it: its model, its size (the gait slows or
+//  about (they announce themselves on a message channel) or marked off, or the one its loader names (bot-<id>.js sets
+//  BOT_ID; a copy that claimed that bot gives way to it), and becomes it: its model, its size (the gait slows or
 //  quickens with size, as a real one's would: speed with the square root of size), whether it climbs stairs, a home
 //  area it keeps to, and rockets in its feet for some (hopping up to and down from upper floors at the rocket hops).
 //  A scripted avatar without an account has no display name: its looks tell it apart. A bot with an account (its
@@ -96,6 +96,9 @@
                 boredUntil: 0, loudest: 0 };
     var visitorSince = {}, greetedAt = {}, lastTick = 0, lastSaid = 0, hopsOf = {}, flame = null;
     var GUARD_RANGE = 15, ARRIVE_RANGE = 12, guard = null, speech = [];
+    var CROWD_RANGE = 3, CROWD_SIZE = 2;              // this many other bots this close is a crowd (m)
+    var crowdSince = 0, keepToItselfUntil = 0, crowd = [], CHATTER_GAP = 8000, chatteredAt = 0;
+    var MILL = 4, OUTDOORS = 0.3, hasCover = false;   // a guide's milling about its post (m); how often a bot heads outside
     var heardChunks = [], HEARD_KEEP = 8000;          // what it heard in the last 8 s, as {t, audio}
     var following = null, stayUntil = 0, tour = null, guide = null;
     var mind = { energy: 0.5, curiosity: 0.5, shyness: 0.5, chattiness: 0.5, sociability: 0.5 };
@@ -116,8 +119,9 @@
 
     // ── its voice ───────────────────────────────────────────────────────────
     // "chirp" is any of the eight short ones; one sound at a time, and not too chatty
+    // (a line said only by chance is chatter: at most one every CHATTER_GAP, so a group of bots isn't a din)
     function say(name, chance) {
-        if (chance !== undefined && Math.random() > chance) return false;
+        if (chance !== undefined && (Math.random() > chance || Date.now() - chatteredAt < CHATTER_GAP)) return false;
         if (MOUSE) name = { alert: "mouse_squeal", question: "mouse_squeal", sad: "mouse_squeal", ooh: "mouse_squeal" }[name] ||
                           (/^(rocket|servo|clank|whirr)$/.test(name) ? name : "mouse_" + (1 + Math.floor(Math.random() * 3)));
         else if (ASTRO) name = { alert: "astro_scream", sad: "sad", ooh: "astro_scream" }[name] ||
@@ -130,6 +134,7 @@
         if (!s || !s.downloaded || Agent.isPlayingAvatarSound || Date.now() - lastSaid < 600) return false;
         Agent.playAvatarSound(s);
         lastSaid = Date.now();
+        if (chance !== undefined) chatteredAt = lastSaid;
         return true;
     }
 
@@ -186,6 +191,7 @@
     function isHop(u, v) { return !!(hopsOf[u] && hopsOf[u].indexOf(v) >= 0); }
     function isEdge(i) { return (nav.cells[i][3] & 1) !== 0; }
     function isWall(i) { return (nav.cells[i][3] & 2) !== 0; }
+    function isCovered(i) { return (nav.cells[i][3] & 4) !== 0; }     // something over it: indoors (build_nav.py)
     function nearestCell(p, maxRise) {
         var cx = Math.floor((p.x - nav.origin[0]) / nav.cell), cz = Math.floor((p.z - nav.origin[1]) / nav.cell);
         var best = -1, bestD = 1e9;
@@ -387,6 +393,34 @@
         return false;
     }
 
+    // ── company ─────────────────────────────────────────────────────────────
+    // the roster's bot behind an avatar, if it's one of ours (from what it announces)
+    function rosterBot(session) {
+        var b = botId(session);
+        for (var k = 0; b && k < roster.bots.length; k++) if (roster.bots[k].id === b) return roster.bots[k];
+        return null;
+    }
+    // how many other bots are within CROWD_RANGE of a spot (leaving out one, the bot it's about)
+    function botsNear(p, near, skip) {
+        return near.filter(function (o) { return o.duck && o.id !== skip && dist(o.pos, p) < CROWD_RANGE; }).length;
+    }
+    // in a crowd a while (a sociable bot stays longer): it breaks away, somewhere well off, and keeps to itself a while
+    function hadEnoughCompany(near, now) {
+        if (botsNear(me.pos, near) < CROWD_SIZE) { crowdSince = 0; return false; }
+        crowdSince = crowdSince || now;
+        if (now - crowdSince < 25000 + 50000 * mind.sociability) return false;
+        var far = pickCell(function (i) { return !isEdge(i) && dist(cellPos(i), me.pos) > 10; });
+        if (far < 0) return false;
+        crowdSince = 0; following = null;
+        keepToItselfUntil = now + rnd(120000, 240000);
+        log("had enough company");
+        goTo(far, { name: "idle" }, "away from the crowd");
+        return true;
+    }
+    // somewhere to head for: inside, mostly (a cell with nothing over it only now and then), and not into a crowd
+    function indoorsOk(i) { return !hasCover || isCovered(i) || Math.random() < OUTDOORS; }
+    function crowded(i) { return botsNear(cellPos(i), crowd) >= CROWD_SIZE; }
+
     // ── deciding what to do ─────────────────────────────────────────────────
     function goTo(cell, then, why) {
         var t0 = Date.now();
@@ -403,12 +437,15 @@
 
     function decide() {
         var near = others(), now = Date.now();
+        crowd = near.filter(function (o) { return o.duck; });
         if (now < stayUntil) { idle(4); return; }                    // told to stay
+        if (!(following && !following.buddy) && hadEnoughCompany(near, now)) return;
         if (following) {                                             // told to follow: keep close to them
             var f = following.who && AvatarList.getAvatar(following.who);
             if (!f || !f.position || now > following.until) { following = null; say(f && f.position ? "trill" : "chirp", 0.5); }
             else {
-                if (dist(f.position, me.pos) > 2.2 + SIZE) comeTo(f.position, { name: "idle" });
+                // (a friend it can't reach, up stairs it can't climb, say: it gives up on the walk)
+                if (dist(f.position, me.pos) > 2.2 + SIZE) { if (!comeTo(f.position, { name: "idle" }) && following.buddy) following = null; }
                 else idle(1.5);
                 return;
             }
@@ -426,17 +463,20 @@
                 var spot = nearestCell(Vec3.sum(o.pos, Vec3.multiply(0.8 + 0.5 * SIZE, Vec3.normalize(Vec3.subtract(me.pos, o.pos)))), 1.2);
                 if (allowed(spot)) { goTo(spot, { name: "greet", who: o.id }, friendly(o.id) ? "an old friend" : "a visitor"); return; }
             }
-            var seekAfter = (botFriend(o.id) ? 60000 : 200000) * (1.3 - mind.sociability);
-            if (o.duck && d < 6 + 12 * mind.sociability && now - (greetedAt[o.id] || 0) > seekAfter) {
+            // another bot: now and then (friends sooner), but not one at its post (a guide or a bouncer: they'd draw
+            // everyone to them), not one that already has company, and not while it's keeping to itself
+            var seekAfter = (botFriend(o.id) ? 120000 : 240000) * (1.3 - mind.sociability), rb = o.duck && rosterBot(o.id);
+            if (o.duck && d < 6 + 12 * mind.sociability && now - (greetedAt[o.id] || 0) > seekAfter &&
+                now > keepToItselfUntil && !(rb && rb.role) && botsNear(o.pos, near, o.id) < CROWD_SIZE) {
                 greetedAt[o.id] = now;
                 var meet = nearestCell(Vec3.mix(me.pos, o.pos, 0.4), 1.2);
                 if (allowed(meet)) { goTo(meet, { name: "greet", who: o.id, duck: true }, botFriend(o.id) ? "a friend" : "another bot"); return; }
             }
         }
         // something on the spot now and then: a sit, a peck at the ground, a kick, or a roll if there's room
-        if (MOUSE && Math.random() < 0.3) { say("chirp", 0.5); idle(rnd(0.5, 2)); return; }    // a pause, a chatter
+        if (MOUSE && Math.random() < 0.3) { say("chirp", 0.3); idle(rnd(0.5, 2)); return; }    // a pause, a chatter
         if (ASTRO && Math.random() < 0.1 + 0.25 * mind.energy) {                             // a dome spin and a whistle
-            say("chirp");
+            say("chirp", 0.4);
             state = { name: "act", kind: "spin", start: Date.now(), until: Date.now() + rnd(2500, 4500), headOverride: true,
                       dir: Math.random() < 0.5 ? -1 : 1 };
             return;
@@ -449,7 +489,7 @@
             else startMove(Math.random() < 0.5 ? "kick_left" : "kick_right");
             return;
         }
-        say("chirp", 0.03 + 0.25 * mind.chattiness);
+        say("chirp", 0.02 + 0.12 * mind.chattiness);
         // a curious bot goes to look at things more than it just wanders
         var target = -1, then = null, why = "";
         var roll = Math.random() < 0.4 + 0.5 * mind.curiosity ? Math.random() * 0.72 : 0.72 + Math.random() * 0.28;
@@ -463,22 +503,39 @@
         } else if (roll < 0.72 && nav.pois.length) {                  // look at something
             var poi = pick(nav.pois), p = { x: poi.p[0], y: poi.p[1], z: poi.p[2] };
             var c = nearestCell(Vec3.sum(p, { x: rnd(-1.5, 1.5), y: -1, z: rnd(-1.5, 1.5) }), 3);
-            target = allowed(c) ? c : -1; then = { name: "look", at: p }; why = poi.kind;
+            target = allowed(c) && indoorsOk(c) && !crowded(c) ? c : -1; then = { name: "look", at: p }; why = poi.kind;
         } else {                                                      // wander
             target = pickCell(function (i) { return !isEdge(i) && !isWall(i); });
             then = { name: "idle" }; why = "somewhere";
         }
         if (target >= 0) goTo(target, then, why); else idle(2);
     }
-    // a random cell of a kind, not too near and not too far (so walks stay a few metres to a couple of dozen)
+    // a random cell of a kind, not too near and not too far (so walks stay a few metres to a couple of dozen), inside
+    // mostly and not into a crowd (late on, anywhere will do)
     function pickCell(ok) {
         for (var tries = 0; tries < 400; tries++) {
             var i = Math.floor(Math.random() * nav.cells.length);
             if (!ok(i) || !allowed(i)) continue;
             var d = dist(cellPos(i), me.pos);
-            if (d > 3 && d < 25) return i;
+            if (d <= 3 || d >= 25 || tries < 300 && (!indoorsOk(i) || crowded(i))) continue;
+            return i;
         }
         return -1;
+    }
+    // a random cell of a kind within r of a spot, on its level (by the map's columns: quick however big the map)
+    function pickNear(p, r, ok) {
+        var cx = Math.floor((p.x - nav.origin[0]) / nav.cell), cz = Math.floor((p.z - nav.origin[1]) / nav.cell);
+        var n = Math.ceil(r / nav.cell), found = [];
+        for (var dx = -n; dx <= n; dx++) {
+            for (var dz = -n; dz <= n; dz++) {
+                var list = columns[(cx + dx) * 100000 + (cz + dz)] || [];
+                for (var k = 0; k < list.length; k++) {
+                    var q = cellPos(list[k]);
+                    if (Math.abs(q.y - p.y) < 1.5 && dist(q, p) < r && allowed(list[k]) && ok(list[k])) found.push(list[k]);
+                }
+            }
+        }
+        return found.length ? pick(found) : -1;
     }
 
     // ── listening ───────────────────────────────────────────────────────────
@@ -614,8 +671,10 @@
     function comeTo(at, then) {
         var away = Vec3.normalize(Vec3.subtract(me.pos, at));
         var c = nearestCell(Vec3.sum(at, Vec3.multiply(0.8 + 0.5 * SIZE, away)), 1.5);
-        if (allowed(c)) goTo(c, then || { name: "greet", who: null }, "called");
-        else say("question");
+        if (allowed(c)) { goTo(c, then || { name: "greet", who: null }, "called"); return true; }
+        say("question");
+        idle(rnd(1, 2));                          // (or it decides again straight away, and asks again)
+        return false;
     }
     // a little jump where it stands: a crouch and a spring (with a puff of flame for a bot with rockets)
     function jumpInPlace() {
@@ -629,7 +688,7 @@
         var now = Date.now(), near = others();
         near.forEach(function (o) {
             if (dist(o.pos, me.pos) < LOOK_RANGE) {
-                if (!visitorSince[o.id]) { visitorSince[o.id] = now; if (!o.duck && !bot.role) say("alert", 0.4); }
+                if (!visitorSince[o.id]) { visitorSince[o.id] = now; if (!o.duck && !bot.role) say("alert", 0.25); }
             } else delete visitorSince[o.id];
         });
         // whoever's closest within range gets watched, unless we're busy peering
@@ -655,7 +714,7 @@
         else if (state.name === "start" || state.name === "idle" && now > state.until) {
             if (bot.role === "guide") guideDecide(near, now); else decide();
         }
-        if (state.name === "walk" && Math.random() < dt * 0.02 * mind.chattiness) say("chirp", 0.6);
+        if (state.name === "walk" && Math.random() < dt * 0.008 * mind.chattiness) say("chirp", 0.6);
         saveMemory(now);
 
         if (state.name === "walk") walk(dt, now);
@@ -705,10 +764,15 @@
                 if (allowed(spot)) { say("chirp"); goTo(spot, { name: "offer", who: o.id }, "a newcomer"); return; }
             }
         }
-        // otherwise back to its post, and wait there
-        if (bot.post && dist(me.pos, post) > 1.2) {
+        // otherwise back to its post (after a tour, say), and wait about there: milling round it (bots.json "mill",
+        // m), now facing the way visitors come, now just standing
+        if (bot.post && dist(me.pos, post) > MILL + 1.2) {
             var home = nearestCell(post, 1.0);
             if (allowed(home)) { goTo(home, { name: "post" }, "back to its post"); return; }
+        }
+        if (bot.post && MILL > 0 && Math.random() < 0.5) {
+            var spot = pickNear(post, MILL, function (i) { return !isEdge(i) && dist(cellPos(i), me.pos) > 1.5; });
+            if (spot >= 0) { goTo(spot, Math.random() < 0.4 ? { name: "post" } : { name: "idle" }, "milling about"); return; }
         }
         if (now > g.nextMutter) {
             g.nextMutter = now + rnd(120000, 300000);
@@ -819,7 +883,7 @@
         }
         if (Math.abs(err) > TURN_FIRST) { state = { name: "turn", yaw: want, after: state }; return; }
         me.yaw = wrap(me.yaw + clamp(err, -STEER * (MOUSE ? 3 : 1) * dt, STEER * (MOUSE ? 3 : 1) * dt));
-        if (MOUSE && Math.random() < dt * 0.25) say("whirr", 0.5);
+        if (MOUSE && Math.random() < dt * 0.1) say("whirr", 0.5);
         var speed = cyc.cycles.walk.speed * SPEEDUP * SIZE / GAIT * PACE;
         var step = speed * dt;
         var here = cellPos(path[pathAt]);
@@ -981,7 +1045,8 @@
                 if (allowed(c)) { goTo(c, { name: "idle" }, "away from the edge"); return; }
             }
             if (state.kind === "greet" && state.old && Math.random() < 0.5) { jumpInPlace(); return; }   // pleased to see you
-            if (state.kind === "greet" && state.duck && state.who && botFriend(state.who) && Math.random() < mind.sociability) {
+            var rb = state.kind === "greet" && state.duck && state.who && rosterBot(state.who);
+            if (rb && !rb.role && botFriend(state.who) && now > keepToItselfUntil && Math.random() < mind.sociability) {
                 following = { who: state.who, until: now + rnd(30000, 70000), buddy: true };              // walk together a while
                 log("going for a walk with " + botId(state.who));
                 idle(0.5);
@@ -1209,7 +1274,7 @@
         if (typeof BOT_ID !== "undefined") {      // run from a bot's own loader (bot-<id>.js): that bot
             for (var b = 0; b < roster.bots.length; b++) if (roster.bots[b].id === BOT_ID) return roster.bots[b];
         }
-        var taken = botsAbout(), free = roster.bots.filter(function (x) { return !x.role; });
+        var taken = botsAbout(), free = roster.bots.filter(function (x) { return !x.role && !x.off; });   // (off: out of the world)
         for (var i = 0; i < free.length; i++) if (!taken[free[i].id]) return free[i];
         return pick(free);                        // more copies than bots: double up
     }
@@ -1226,21 +1291,32 @@
     function become(b) {
         bot = b; SIZE = b.size || 1; GAIT = Math.sqrt(SIZE);
         area = b.home ? roster.areas[b.home] : null;
+        MILL = b.mill !== undefined ? b.mill : 4;
+        OUTDOORS = b.outdoors !== undefined ? clamp(b.outdoors, 0, 1) : 0.3;
+        crowdSince = 0; keepToItselfUntil = 0;
         Avatar.displayName = b.name;              // for an engine that lets an anonymous agent name itself; signed in, the account's name wins
         Avatar.skeletonModelURL = BASE + "duck-" + b.id + ".fst";
         order = null; rotations = [];
         // hatch: its home area's spot, or somewhere open in its home area, or in the roster's hatching area, or anywhere
+        // somewhere at random: of a few spots, the one it can get furthest from (a bot that can't climb, hatched on a
+        // raised forecourt, would never leave it)
         reach = null;                             // a new identity: its reach is worked out again from its hatching
-        var start = -1;
+        var start = -1, fixed = false, t0 = Date.now(), best = -1, bestReach = null, most = 0;
         if (b.post) start = nearestCell({ x: b.post[0], y: b.post[1], z: b.post[2] }, 1.0);
         else if (area && area.hatch) start = nearestCell({ x: area.hatch[0], y: area.hatch[1], z: area.hatch[2] }, 1.0);
-        for (var tries = 0; tries < 4000 && !allowed(start); tries++) {
-            var c = Math.floor(Math.random() * nav.cells.length);
-            if (allowed(c) && (area || inHatch(c)) && !isEdge(c) && !isWall(c) && nav.links[c].length === 8) start = c;
+        fixed = allowed(start);
+        for (var spot = 0; spot < (fixed ? 1 : 6) && most < nav.cells.length / 2; spot++) {
+            reach = null;
+            if (!fixed) start = -1;
+            for (var tries = 0; tries < 4000 && !allowed(start); tries++) {
+                var c = Math.floor(Math.random() * nav.cells.length);
+                if (allowed(c) && (area || inHatch(c)) && !isEdge(c) && !isWall(c) && nav.links[c].length === 8) start = c;
+            }
+            var r = findReach(start), n = r.filter(function (x) { return x; }).length;
+            if (n > most) { most = n; best = start; bestReach = r; }
         }
-        var t0 = Date.now();
-        reach = findReach(start);
-        log("can reach " + reach.filter(function (x) { return x; }).length + " cells (" + (Date.now() - t0) + " ms)");
+        start = best; reach = bestReach;
+        log("can reach " + most + " cells (" + (Date.now() - t0) + " ms)");
         me.node = start;
         me.pos = cellPos(start);
         me.yaw = b.facing !== undefined ? b.facing : rnd(-Math.PI, Math.PI);
@@ -1282,6 +1358,9 @@
     }
 
     Agent.isAvatar = true;
+    // a bot run from its own loader wears its own model from the start: until it has loaded the roster and the map and
+    // become itself (a few seconds, longer on a busy host) it would otherwise show as the engine's default avatar
+    if (typeof BOT_ID !== "undefined") Avatar.skeletonModelURL = BASE + "duck-" + BOT_ID + ".fst";
     // the avatar mixer only sends the avatars ahead of an agent, plus those within this radius all round (needs a
     // server with Agent.avatarViewRadius, 2026-10-13; older ones see only ahead)
     Agent.avatarViewRadius = VIEW_RADIUS;
@@ -1292,6 +1371,7 @@
         var loadStart = Date.now();
         roster = Script.require(BASE + "bots.json");
         nav = Script.require(BASE + "nav.json");
+        hasCover = nav.cells.some(function (c) { return (c[3] & 4) !== 0; });   // (an older map has none marked)
         log("map loaded in " + (Date.now() - loadStart) + " ms");
         cyc = Script.require(BASE + "duck-cycles.json");
         (nav.hops || []).forEach(function (h) {

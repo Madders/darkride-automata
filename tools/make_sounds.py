@@ -12,7 +12,7 @@ envelopes, in a few moods:
 - servo, clank, countdown: a big bot's hydraulics, heavy feet and countdown beeps.
 - mouse_1..3, mouse_squeal, whirr: a mouse bot's rapid chatter, its squeal when startled, its motor.
 - astro_1..5, astro_scream: an astromech's whistles and warbles, and its scream; gonk_1..2: a power bot's honk.
-Written as 16-bit mono WAV at 24 kHz to bot/sounds/. Usage: python make_sounds.py
+Written as 16-bit mono WAV at 24 kHz to bot/sounds/, the chatter at a lower level than the rest (CHATTER). Usage: python make_sounds.py
 """
 import math
 import pathlib
@@ -69,8 +69,14 @@ def join(*parts, gap=0.05):
     return np.concatenate(out[:-1])
 
 
+# the bots' chatter (chirps, trills, whistles, honks...) sits well below a voice, so a group of them isn't a din across
+# the world; the big bot's machinery, the countdown and the rockets stay loud
+LOUD = ("rocket", "servo", "clank", "countdown")
+CHATTER = 0.3
+
+
 def save(name, x):
-    x = x / max(1e-6, np.abs(x).max()) * 0.8
+    x = x / max(1e-6, np.abs(x).max()) * (0.8 if name in LOUD else CHATTER)
     OUT.mkdir(parents=True, exist_ok=True)
     with wave.open(str(OUT / (name + ".wav")), "wb") as w:
         w.setnchannels(1)

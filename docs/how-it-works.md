@@ -31,19 +31,23 @@ Run `duck-bot.js` with as many instances as you want bots. Each copy:
 
 1. joins the bots' message channel (`darkride.bots`, or the roster's `channel`) and listens a few seconds;
 2. loads the roster, the map and the motion;
-3. takes the **first bot on the roster nobody has announced** (each bot announces itself every 8 seconds, and wears a
+3. takes the **first bot on the roster nobody has announced** (leaving out bots marked `off`) (each bot announces itself every 8 seconds, and wears a
    model named after it, so others can tell); if two pick the same one at once, the one with the higher session id
    picks again;
 4. wears that bot's model (`duck-<id>.fst`) and works out which cells of the map it can reach from where it hatches
-   (its stairs rule, its rockets, its home area), so it never plans a route it can't take.
+   (its stairs rule, its rockets, its home area), so it never plans a route it can't take. A bot without a post or a
+   hatching spot tries a few places at random and hatches at the one it can get furthest from: a bot that can't climb
+   stairs, hatched on a raised patch with a step all round, would never leave it.
 
-Copies start 6 to 15 seconds after the domain hands them out, a little apart, so most see the earlier ones' choices.
+A bot run from its own loader (`bot-<id>.js`) wears its model from the moment it starts, before it has loaded
+anything; without that, it shows as the engine's default avatar until it has. Copies start 6 to 15 seconds after the domain hands them out, a little apart, so most see the earlier ones' choices.
 
 ## The map
 
 `nav.json` (from `tools/build_nav.py`) is the world cut into 25 cm cells, with every walkable surface on every level:
 - **cells**: `[ix, iz, height, flags]`; flag 1 is an *edge* (a drop beside it, nothing there: something to peer over),
-  flag 2 a *wall* (something solid beside it);
+  flag 2 a *wall* (something solid beside it), flag 4 *covered* (something over it within 12 m: a ceiling, a roof,
+  an upper floor; indoors, roughly);
 - **links**: each cell's walkable neighbours (the step small enough, nothing in between at knee, mid, chest or
   handrail height, so glass and railings stop them too);
 - **hops**: rocket hops, `[upper cell, lower cell]`;
@@ -56,13 +60,21 @@ walls a little.
 
 When it has nothing to do, a bot picks:
 - **a visitor** close by for a few seconds: walk up and say hello (a chirp, a nod), now and then;
-- **another bot** within 12 m: meet halfway, face each other, trill and nod, every couple of minutes;
+- **another bot** within 12 m: meet partway, face each other, trill and nod, every few minutes; but not a bot at
+  its post (a guide or a bouncer, which would draw every bot to it) or one that already has company;
 - **a move on the spot** (about one time in five): peck at the ground, sit for a while, roll (only with room ahead),
   or kick;
 - **an edge**: walk to it, face the drop, lean out to peer over with an "oooh", look left and right, back away;
 - **a wall**: face it and look it up and down;
 - **a point of interest**: go near it and look at it;
 - **somewhere**: wander.
+
+Where it goes is mostly indoors: a covered cell always does, one with nothing over it only three times in ten
+(`outdoors` in the roster), so bots go outside now and then but spend most of their time in (a map built before
+2026-10-26 has no covered cells: rebuild it, and until then bots go anywhere alike). It doesn't head for
+a spot that already has two bots by it. And a bot that has had two or more others within 3 m for a while (25 s, up to
+75 s for a sociable one) has had enough company: it goes somewhere at least 10 m off and keeps to itself for two to
+four minutes (no seeking out other bots, no walks with friends), so groups form and break up rather than grow.
 
 Whatever it's doing, it watches the nearest visitor within 4 m with its head.
 
@@ -89,7 +101,14 @@ after their last sound) it answers: a chirp, or a questioning "hm?" if they talk
 has one, opens with the loudness of its own sound. Bots never speak words: they beep.
 
 Other sounds: an alert beep when a visitor arrives, a trill greeting another bot or after a roll, "oooh" peering over
-a drop, a sad note when ignored, and the rocket's whoosh. All are synthesised (`tools/make_sounds.py`).
+a drop, a sad note when ignored, and the rocket's whoosh. All are synthesised (`tools/make_sounds.py`), the chatter
+(everything but the rockets and a bouncer's machinery) well below the level of a voice. Anything a bot says only by
+chance (a chirp as it walks, an "oooh" at an edge) is chatter, and it chatters at most once in 8 s.
+
+They're played as the bot's own avatar audio, so the audio mixer places them where the bot is and makes them quieter
+with distance as it does for a person's voice: by the domain's *attenuation per doubling in distance* (Audio
+settings; 0.5 by default, half as loud each time the distance doubles). Walls don't stop sound; a domain's audio
+zones can (each zone pair has a coefficient), so a building's inside can be kept from hearing the bots outside.
 
 ## Personality and memory
 
@@ -133,7 +152,8 @@ without one, every bot near you may answer.
 ## Guides
 
 A bot with `"role": "guide"` (docs/designing-bots.md) runs from its own loader like a bouncer and gives tours: it
-waits at its post, walks over to offer a tour to anyone new who lingers nearby, then leads them from stop to stop,
+waits about its post (milling round it, within `mill` metres), walks over to offer a tour to anyone new who lingers
+nearby, then leads them from stop to stop,
 pausing to call them if they lag, giving up if they wander off, and saying its piece at each stop (its lines are
 spoken sounds, as a bouncer's). Spoken "tour" asks for one; "no", "stop" and "go away" end it.
 
