@@ -158,10 +158,22 @@ python tools/manage.py --config manager.json restart|stop|start <id>
   `docker inspect` (which shows the environment).
 - The roster's `off` is the copy on that machine: the copy on your asset server only changes when you upload it.
 
-**From another machine** (a dashboard on the LAN): put `manage.py` and its config on the bots' host, and give the
-dashboard an ssh key of its own whose `authorized_keys` line there runs only the manager:
+On the bots' host it's laid out like this (the paths in `examples/manager.json` are relative to the config):
 ```
-command="python3 /opt/automata/residents/manage.py --config /opt/automata/residents/manager.json --ssh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... dashboard
+/opt/automata/tools/manage.py          the manager
+/opt/automata/manager.json             its config (examples/manager.json)
+/opt/automata/residents/               resident.sh, accounts, the key files, bots.json (for the names)
+
+python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json status --json
+python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json restart|stop|start <id>
+```
+The commands are only those: `status [--json]` and `restart`, `stop` or `start <id>`, where an id is lower-case
+letters, digits, `_` and `-`. Anything else is refused before docker or ssh is touched.
+
+**From another machine** (a dashboard on the LAN): give the dashboard an ssh key of its own whose `authorized_keys`
+line on the bots' host runs only the manager:
+```
+command="python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json --ssh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... dashboard
 ```
 With `--ssh` it takes the command from `SSH_ORIGINAL_COMMAND` and allows only `status --json` and `restart`, `stop`
 or `start <id>`. The dashboard's own config is `{"backend": "ssh", "ssh": {"host": "...", "user": "...", "key":

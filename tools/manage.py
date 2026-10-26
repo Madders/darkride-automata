@@ -18,7 +18,7 @@ Everything about the host is in a config file (JSON; paths in it are relative to
 
 On the host, the ssh key's authorized_keys line runs this with --ssh, which takes the command from
 SSH_ORIGINAL_COMMAND and allows only the four below:
-    command="python3 /opt/automata/residents/manage.py --config /opt/automata/residents/manager.json --ssh",
+    command="python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json --ssh",
     no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... dashboard
 
 Usage: python manage.py --config <manager.json> status [--json]
@@ -39,7 +39,7 @@ import shlex
 import subprocess
 import sys
 
-ID = re.compile(r"^[a-z0-9]+$")
+ID = re.compile(r"^[a-z0-9_-]+$")
 ACTIONS = ("restart", "stop", "start")
 TIMEOUT = 60                            # seconds for any one docker or ssh call
 SIGN_IN_WINDOW = datetime.timedelta(minutes=10)
@@ -81,7 +81,7 @@ def load_config(path):
 
 # the accounts file and the roster
 
-ACCOUNT_LINE = re.compile(r"^(\s*)([a-z0-9]+)(\s+)([A-Za-z0-9_]+)(\s+off)?(\s*(#.*)?)$")
+ACCOUNT_LINE = re.compile(r"^(\s*)([a-z0-9_-]+)(\s+)([A-Za-z0-9_]+)(\s+off)?(\s*(#.*)?)$")
 
 
 def accounts(config):
@@ -251,7 +251,7 @@ def status(config):
 
 def find(config, bot_id):
     if not ID.match(bot_id or ""):
-        raise Failed("a bot id is lower-case letters and digits, as in the roster")
+        raise Failed("a bot id is lower-case letters, digits, _ and -, as in the roster")
     for i, username, off in accounts(config):
         if i == bot_id:
             name = container_name(config, i, username)
@@ -355,6 +355,10 @@ def main(argv=None):
         as_json = words[0] in ACTIONS or "--json" in words
         if words[0] in ACTIONS and len(words) != 2:
             parser.error(f"{words[0]} <id>")
+        if words[0] == "status" and len(words) > 1 + ("--json" in words):
+            parser.error("status [--json]")
+        if words[0] in ACTIONS and not ID.match(words[1]):          # before any docker or ssh
+            raise Failed("a bot id is lower-case letters, digits, _ and -, as in the roster")
         config = load_config(args.config)
         if config["backend"] == "ssh":
             out, code = over_ssh(config, ["status", "--json"] if words[0] == "status" else words)

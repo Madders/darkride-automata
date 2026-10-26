@@ -203,7 +203,10 @@ class Manage(unittest.TestCase):
 
     def test_bad_ids(self):
         self.assertIn("isn't in", self.action("stop", "woody", ok=False))
-        self.assertIn("lower-case", self.action("stop", "../x", ok=False))
+        for bad in ("../x", "Scout", "a b", "x;y", ""):
+            self.assertIn("lower-case", self.action("stop", bad, ok=False))
+        self.assertIn("isn't in", self.action("stop", "my_bot-2", ok=False))       # a good id, just not ours
+        self.assertFalse((self.dir / "calls.txt").exists())
         self.assertEqual((self.dir / "accounts").read_text(), ACCOUNTS)
 
     def test_docker_down(self):
@@ -214,6 +217,13 @@ class Manage(unittest.TestCase):
         self.assertEqual(run.returncode, 1)
         self.assertEqual(json.loads(run.stdout),
                          {"ok": False, "message": "docker ps: Cannot connect to the Docker daemon"})
+
+    def test_bad_ids_never_reach_docker_or_ssh(self):
+        client = self.dir / "client.json"
+        client.write_text(json.dumps({"backend": "ssh", "ssh": {"host": "bots.lan", "command": ["no-such-ssh"]}}))
+        for config in (self.config, client):
+            self.assertIn("lower-case", self.action("restart", "x;reboot", config=config, ok=False))
+        self.assertFalse((self.dir / "calls.txt").exists())
 
     def test_over_ssh(self):
         client = self.dir / "client.json"

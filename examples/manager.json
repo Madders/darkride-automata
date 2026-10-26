@@ -1,8 +1,8 @@
 {
-  "about": "tools/manage.py's config, for the bots' host (backend local-docker) beside resident.sh and its accounts file. Paths are relative to this file. A dashboard on another machine uses one with backend ssh instead: see docs/adding-to-your-world.md, Managing them from a dashboard.",
-  "accounts": "accounts",
-  "roster": "bots.json",
+  "about": "tools/manage.py's config on the bots' host (backend local-docker), deployed as /opt/automata/manager.json with the manager at /opt/automata/tools/manage.py and resident.sh and its accounts file in /opt/automata/residents. Paths are relative to this file. A dashboard on another machine uses one with backend ssh instead: see docs/adding-to-your-world.md, Managing them from a dashboard.",
+  "accounts": "residents/accounts",
+  "roster": "residents/bots.json",
   "container": "resident-{id}",
-  "create": ["sh", "resident.sh", "start", "{id}"],
+  "create": ["sh", "residents/resident.sh", "start", "{id}"],
   "backend": "local-docker"
 }
