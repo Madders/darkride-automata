@@ -1,0 +1,8 @@
+{
+  "about": "tools/manage.py's config, for the bots' host (backend local-docker) beside resident.sh and its accounts file. Paths are relative to this file. A dashboard on another machine uses one with backend ssh instead: see docs/adding-to-your-world.md, Managing them from a dashboard.",
+  "accounts": "accounts",
+  "roster": "bots.json",
+  "container": "resident-{id}",
+  "create": ["sh", "resident.sh", "start", "{id}"],
+  "backend": "local-docker"
+}

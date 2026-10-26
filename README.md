@@ -41,6 +41,8 @@ On Darkride, each one can sign in to a **bot account** of its own, so visitors s
 - **A packager** (`tools/package.py`): builds the folder of files to upload to your asset server.
 - **A voice maker** (`tools/make_voice.py`, Windows): speaking bots' lines, made into a machine's voice.
 - **The motion recorder** (`motions/`): if you want to record new moves from Pollen's policies.
+- **A manager** (`tools/manage.py`): status, restart and taking offline of the bots that have their own accounts,
+  for a dashboard to call, locally or over ssh ([Managing them from a dashboard](docs/adding-to-your-world.md#managing-them-from-a-dashboard)).
 - **Ears and memory** (`tools/hearing.py`): a small offline speech service for spoken commands, which also keeps
   their memories.
 - **Tests** (`tests/`): scripts that photograph them, check their joints, make them talk and hop, give spoken

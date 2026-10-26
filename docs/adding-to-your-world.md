@@ -134,6 +134,40 @@ plain client in the pool, or no key) it runs exactly as before.
 A bot with an account costs what it did as a child of a shared client (below): the shared client's children are
 separate processes already, so moving a bot to its own client adds only that client's few MB of start-up.
 
+## Managing them from a dashboard
+
+`tools/manage.py` looks at the bots that have their own accounts and starts and stops them, so that a dashboard can
+call it and never touch a container or a key (Python 3.8+, nothing to install). It reads a config file
+(`examples/manager.json`): the accounts file (`<id> <username> [off]` per line), the roster for the bots' names, the
+container's name (`resident-{id}`), and a command that makes a bot's container when there isn't one (`resident.sh
+start {id}`).
+
+```
+python tools/manage.py --config manager.json status --json
+python tools/manage.py --config manager.json restart|stop|start <id>
+```
+
+- `status --json`: `{"bots": [{"id", "name", "username", "enabled", "container": {"state": "running|exited|missing",
+  "uptime_s", "docker"}, "signed_in"}]}`, where `docker` is docker's own word for the state (restarting, paused...).
+  `signed_in` comes from the first 10 minutes of this run's log: "Signed in as" is true, a refused key false, neither
+  null; a bot that isn't running is false. Without `--json`, a table.
+- `stop <id>` takes a bot offline: marks it `off` in the accounts file (and the roster, if the config names one), then
+  stops its container. `start <id>` takes the `off` away and starts it again, or makes it. `restart <id>` restarts a
+  bot that isn't off. Each prints one line, `{"ok": true|false, "message": "..."}`, and exits 0 when ok.
+- It never opens a key file or prints a key, and asks docker only for a container's state, never its full
+  `docker inspect` (which shows the environment).
+- The roster's `off` is the copy on that machine: the copy on your asset server only changes when you upload it.
+
+**From another machine** (a dashboard on the LAN): put `manage.py` and its config on the bots' host, and give the
+dashboard an ssh key of its own whose `authorized_keys` line there runs only the manager:
+```
+command="python3 /opt/automata/residents/manage.py --config /opt/automata/residents/manager.json --ssh",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... dashboard
+```
+With `--ssh` it takes the command from `SSH_ORIGINAL_COMMAND` and allows only `status --json` and `restart`, `stop`
+or `start <id>`. The dashboard's own config is `{"backend": "ssh", "ssh": {"host": "...", "user": "...", "key":
+"dashboard-key"}}`, and the same command lines then run there. `python tests/manage-test.py` checks the manager with a
+stand-in docker and ssh.
+
 ## What they cost
 
 Each bot is one assignment client: about **110 MB of memory and 5% of one CPU core** (30 updates a second), plus a
