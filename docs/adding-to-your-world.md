@@ -160,7 +160,10 @@ python tools/manage.py --config manager.json restart|stop|start <id>
 - A config with a key of the wrong type (a string where a list goes, a `{placeholder}` other than `{id}` and
   `{username}`) is refused with the same one JSON line before anything runs.
 - The actions take turns (a lock, `.manager.lock` beside the config), so two clicks at once can't write the accounts
-  file or the roster over each other.
+  file or the roster over each other. One that finds another running (an apply's build can take minutes) waits up
+  to 20 s, then gives up with "another action is still running". Keep a dashboard's timeout for an action above
+  that (60 s is fine): over ssh, a dashboard that gives up only kills its ssh client, and the command on the host
+  carries on, so it mustn't still be waiting its turn when the dashboard has said it failed.
 - It never opens a key file or prints a key, and asks docker only for a container's state, never its full
   `docker inspect` (which shows the environment).
 - The roster's `off` is the copy on that machine: the copy on your asset server only changes when you upload it.
@@ -213,7 +216,8 @@ python tools/manage.py --config manager.json apply <id> [--dry-run]  < {"base": 
   default; `shell` and `accent` can't be). It's refused if the entry no longer matches `base` (someone changed it
   since), or if any value isn't one the setting takes, and it answers `{"ok", "message", "diff": [{"setting", "from",
   "to"}], "base"}`. With `--dry-run` that's all. Without it, it changes the bot's own entry in the roster (only its
-  characters: the rest of the file stays as laid out), runs the config's `build` and then `push` with the bot's id,
+  text: the rest of the file stays as laid out, line endings included; an entry spread over several lines
+  becomes one line), runs the config's `build` and then `push` with the bot's id,
   and restarts the bot if it's running. If the build or the push fails, the roster is put back and built (and
   pushed) again, so the files on both sides match it; the message says if that failed too.
 - The config needs a `build` command for apply (without one, only `--dry-run` works), and a `push` unless the build
@@ -222,12 +226,20 @@ python tools/manage.py --config manager.json apply <id> [--dry-run]  < {"base": 
   ```json
   "build": ["/opt/automata/venv/bin/python", "tools/build_bots.py", "--roster", "residents/bots.json", "--out", "site/Duck", "{id}"],
   "push": ["sh", "residents/push-bot.sh", "{id}"],
-  "build_timeout": 600
+  "build_timeout": 150
   ```
 
   `build_bots.py` needs numpy, scipy and trimesh (a venv). It writes the bot's model, textures and loader and the
   roster's copy, `bots.json`, which the brain reads; the push sends those. Both run in the config's folder, under
-  `build_timeout` seconds each (default 600), while the manager's lock is held.
+  `build_timeout` seconds each (default 150), while the manager's lock is held. A step that runs out of time is
+  killed with everything it started (on Linux its whole process group, so an rsync under the push script goes too).
+- How long an apply can take: waiting its turn (20 s), the build and the push, both again if it has to put them
+  back, and the restart (2 × 60 s), so 20 + 4 × `build_timeout` + 120 s: 740 s with the default 150. Through the ssh
+  backend add 60 s (800 s), and give the dashboard's config the same `build_timeout` as the host's, since that's
+  what its ssh client waits by. A dashboard's timeout for an apply has to be longer than that (the console's
+  `bots.settingsTimeoutSeconds`, 900 by default), or it gives up while the manager is still working and can't say
+  how it ended. A real build takes about 10 s, so 150 leaves plenty; if you raise it, raise the dashboard's too.
+- `apply --dry-run` only reads, so it doesn't wait for the lock: a review works while another bot is building.
 
 ## What they cost
 

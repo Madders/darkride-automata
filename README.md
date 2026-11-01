@@ -45,7 +45,10 @@ On Darkride, each one can sign in to a **bot account** of its own, so visitors s
   for a dashboard to call, locally or over ssh. On the bots' host it lives at `/opt/automata/tools/manage.py` with its
   config at `/opt/automata/manager.json` (`examples/manager.json`), beside `/opt/automata/residents/`:
   `python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json status --json` or `restart|stop|start
-  <id>` ([Managing them from a dashboard](docs/adding-to-your-world.md#managing-them-from-a-dashboard)).
+  <id>`, and `settings`/`apply <id>` to change a bot's look, size, obedience, home or rockets, rebuild it, push it and
+  restart it ([Managing them from a dashboard](docs/adding-to-your-world.md#managing-them-from-a-dashboard)). A
+  dashboard's timeouts have to outlast the manager's: over 20 s for an action, over 20 + 4 × `build_timeout` + 120 s
+  for an apply (740 s with the default 150; 800 s through the ssh backend).
 - **Ears and memory** (`tools/hearing.py`): a small offline speech service for spoken commands, which also keeps
   their memories.
 - **Tests** (`tests/`): scripts that photograph them, check their joints, make them talk and hop, give spoken

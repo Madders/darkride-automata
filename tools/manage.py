@@ -17,7 +17,10 @@ Everything about the host is in a config file (JSON; paths in it are relative to
                  "--out", "site/Duck", "{id}"]; run in the config's folder
     "push":      how to send that bot's rebuilt files (and the roster's copy, bots.json) to the asset server, "{id}"
                  filled in (optional: leave it out when the build's folder is what the asset server serves)
-    "build_timeout": seconds the build and the push may take, each (default 600)
+    "build_timeout": seconds the build and the push may take, each (default 150). An apply can take up to
+                 apply_timeout(): its turn, the build and the push, both again if it puts them back, and the
+                 restart; with 150 that's 740 s here, 800 s through the ssh backend. A dashboard's timeout for an
+                 apply has to be longer than that, or it gives up while the manager is still working
     "backend":   "local-docker" (docker is here) or "ssh" (docker is on another host, which runs this too)
     "ssh":       for "ssh": {"host", "user", "key" (a key whose authorized_keys line forces the command),
                  "port", "options": [extra -o options], "command": how to run ssh (default ["ssh"])}
@@ -46,7 +49,10 @@ Usage: python manage.py --config <manager.json> status [--json]
              bot's roster entry, runs "build" and "push", and restarts the bot if it's running. If the build or
              push fails, the roster is put back and built again, so the files match it.
 The actions print one JSON line, {"ok": bool, "message": str, ...}, and exit 0 when ok. They take turns: each holds
-.manager.lock beside the config while it runs, so two clicks at once can't write the files over each other.
+.manager.lock beside the config while it runs, so two clicks at once can't write the files over each other. One
+that finds another running waits up to LOCK_WAIT seconds for it, then gives up and says so: a dashboard's action
+timeout has to be longer than that, so that an action it has given up on can't still happen later (over ssh,
+killing the client doesn't stop the command on the host). An apply --dry-run only reads, so it doesn't wait.
 """
 import argparse
 import contextlib
@@ -57,6 +63,7 @@ import os
 import pathlib
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -71,7 +78,8 @@ except ImportError:                     # Windows, where the tests run
 ID = re.compile(r"[a-z0-9][a-z0-9_-]*")  # fullmatch: an id never starts with "-", so it can't pass for an option
 ACTIONS = ("restart", "stop", "start")
 TIMEOUT = 60                            # seconds for any one docker or ssh call
-BUILD_TIMEOUT = 600                     # seconds for the build, and for the push (config "build_timeout")
+LOCK_WAIT = 20                          # seconds an action waits for another one to finish (a dashboard allows 60)
+BUILD_TIMEOUT = 150                     # seconds for the build, and for the push (config "build_timeout")
 SIGN_IN_WINDOW = datetime.timedelta(minutes=10)
 MAX_INPUT = 64 * 1024                   # apply's stdin
 
@@ -211,6 +219,13 @@ def accounts(config):
     return bots
 
 
+def exact_text(path):
+    """A file's text with its line endings as they are (CRLF stays CRLF), so writing it back changes only what
+    was meant to change."""
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
 def write_over(path, text):
     """Replaces a file's text in one step, keeping its permissions."""
     handle, new = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
@@ -228,7 +243,7 @@ def write_over(path, text):
 def taking_turns(config):
     """Holds .manager.lock beside the config for the length of an action, waiting for one that's running."""
     with open(config["here"] / ".manager.lock", "a+b") as f:
-        give_up = time.monotonic() + TIMEOUT * 3
+        give_up = time.monotonic() + LOCK_WAIT
         while True:
             try:
                 if fcntl:
@@ -239,7 +254,7 @@ def taking_turns(config):
                 break
             except OSError:
                 if time.monotonic() > give_up:
-                    raise Failed("another action is still running: try again in a minute")
+                    raise Failed("another action is still running (a build can take minutes): try again soon")
                 time.sleep(0.05)
         try:
             yield
@@ -253,7 +268,7 @@ def taking_turns(config):
 
 def set_off_in_accounts(config, bot_id, off):
     path = config["accounts"]
-    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines = exact_text(path).splitlines(keepends=True)
     for i, line in enumerate(lines):
         body = line.rstrip("\r\n")
         m = ACCOUNT_LINE.match(body)
@@ -285,7 +300,7 @@ def set_off_in_roster(config, bot_id, off):
     path = config.get("roster")
     if not path or not path.exists():
         return False
-    text = path.read_text(encoding="utf-8")
+    text = exact_text(path)
     bots = roster_bots(config)
     if bot_id not in bots or bool(bots[bot_id].get("off")) == off:
         return False
@@ -470,7 +485,7 @@ def read_roster(config):
     if not path:
         raise Failed("the config has no roster, so there are no settings to change")
     try:
-        text = path.read_text(encoding="utf-8")
+        text = exact_text(path)
         doc = json.loads(text)
     except (OSError, ValueError) as e:
         raise Failed(f"can't read the roster: {said(e)}")
@@ -590,19 +605,40 @@ def describe(diff):
     return ", ".join(f"{d['setting']} {shown(d['from'])} -> {shown(d['to'])}" for d in diff)
 
 
+def apply_timeout(build_timeout):
+    """The longest an apply can take: its turn, the build and the push, both again if it has to put them back,
+    then looking at the bot's container and restarting it."""
+    return LOCK_WAIT + 4 * build_timeout + 2 * TIMEOUT
+
+
+def stop_all(run):
+    """Kills a step that ran out of time and everything it started (the rsync under a push script, say), so none
+    of it carries on: the step runs in its own session, so on POSIX its whole process group goes."""
+    if os.name == "posix":
+        with contextlib.suppress(OSError):
+            os.killpg(run.pid, signal.SIGKILL)
+    run.kill()
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        run.communicate(timeout=10)
+
+
 def run_step(config, key, bot_id):
     """Runs the config's build or push for one bot, in the config's folder."""
     command = [part.format(id=bot_id) for part in config[key]]
     timeout = config.get("build_timeout", BUILD_TIMEOUT)
     try:
-        run = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                             timeout=timeout, cwd=config["here"])
-    except subprocess.TimeoutExpired:
-        raise Failed(f"the {key} took longer than {timeout} s")
+        run = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, encoding="utf-8", errors="replace", cwd=config["here"],
+                               start_new_session=os.name == "posix")
     except OSError as e:
         raise Failed(f"couldn't run the {key}: {said(e)}")
+    try:
+        stdout, stderr = run.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        stop_all(run)
+        raise Failed(f"the {key} took longer than {timeout} s")
     if run.returncode:
-        lines = (run.stderr or run.stdout).strip().splitlines()
+        lines = (stderr or stdout).strip().splitlines()
         raise Failed(f"the {key} failed: " + secret_free(lines[-1] if lines else f"exit {run.returncode}"))
 
 
@@ -616,7 +652,7 @@ def settings(config, bot_id):
 
 def apply(config, bot_id, request, dry_run):
     base, changes = read_request(request)
-    with taking_turns(config):
+    with contextlib.nullcontext() if dry_run else taking_turns(config):    # a dry run only reads
         path, text, doc = read_roster(config)
         start_at, end, entry = find_entry(path, text, doc, bot_id)
         if fingerprint(entry) != base:
@@ -690,7 +726,8 @@ def over_ssh(config, words, stdin=None):
     command += [(f"{s['user']}@" if s.get("user") else "") + s["host"], " ".join(words)]
     try:
         run = subprocess.run(command, capture_output=True, text=True, input=stdin or "",
-                             timeout=TIMEOUT * 2 + (2 * config.get("build_timeout", BUILD_TIMEOUT) if words[0] == "apply" else 0))
+                             timeout=TIMEOUT + (apply_timeout(config.get("build_timeout", BUILD_TIMEOUT))
+                                                if words[0] == "apply" and "--dry-run" not in words else TIMEOUT))
     except (OSError, subprocess.TimeoutExpired) as e:
         raise Failed(f"ssh: {e}")
     out = run.stdout.strip()

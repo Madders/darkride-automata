@@ -14,6 +14,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 MANAGE = pathlib.Path(__file__).resolve().parent.parent / "tools" / "manage.py"
@@ -388,10 +389,17 @@ class Manage(Host):
 # build_bots.py, as the build command: logs the call and writes the bot's loader with its roster entry in it, so the
 # test can see what the build saw; "build-fails" (a count) beside it makes that many calls fail
 FAKE_BUILD = r"""
-import json, pathlib, sys
+import json, os, pathlib, subprocess, sys, time
 here = pathlib.Path(__file__).parent
 with open(here / "build.txt", "a") as f:
     f.write(sys.argv[1] + "\n")
+hangs = here / "build-hangs"
+if hangs.exists():                      # hangs once, and on POSIX starts a child that would outlive it (an rsync)
+    hangs.unlink()
+    if os.name == "posix":
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        (here / "build-child").write_text(str(child.pid))
+    time.sleep(60)
 fails = here / "build-fails"
 if fails.exists():
     n = int(fails.read_text())
@@ -605,6 +613,60 @@ class Settings(Host):
         r = self.apply("scout", {"size": 1.3}, ok=False)
         self.assertIn("scout: size 1.0 -> 1.3; built, pushed, but couldn't restart it", r["message"])
         self.assertIn('"size": 1.3', self.roster())
+
+    def test_a_build_that_hangs_is_killed_with_what_it_started_and_put_back(self):
+        config = json.loads(self.config.read_text())
+        config["build_timeout"] = 2
+        self.config.write_text(json.dumps(config))
+        (self.dir / "build-hangs").write_text("")
+        began = time.monotonic()
+        r = self.apply("scout", {"size": 1.3}, ok=False)
+        self.assertLess(time.monotonic() - began, 30)
+        self.assertEqual(r["message"], "scout: the build took longer than 2 s; the roster is back as it was, built "
+                                       "again as it was")
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+        self.assertEqual(json.loads((self.dir / "out" / "bot-scout.js").read_text())["size"], 1.0)
+        if os.name == "posix":
+            child = int((self.dir / "build-child").read_text())
+            for _ in range(40):
+                try:
+                    os.kill(child, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail("the build's own child outlived it")
+
+    def test_a_crlf_roster_and_accounts_keep_their_line_endings(self):
+        crlf = SETTINGS_ROSTER.replace("\n", "\r\n")
+        accounts = ACCOUNTS.replace("\n", "\r\n")
+        (self.dir / "bots.json").write_bytes(crlf.encode())
+        (self.dir / "accounts").write_bytes(accounts.encode())
+        self.apply("scout", {"size": 1.3})
+        after = (self.dir / "bots.json").read_bytes().decode()
+        self.assertEqual(after.replace('"size": 1.3', '"size": 1.0'), crlf)
+        self.action("stop", "scout")
+        self.action("start", "scout")
+        self.assertEqual((self.dir / "accounts").read_bytes().decode(), accounts)
+        self.assertEqual((self.dir / "bots.json").read_bytes().decode(), after)
+
+    def test_waiting_its_turn_gives_up_inside_a_dashboards_timeouts(self):
+        manage = load_manage()
+        self.assertLess(manage.LOCK_WAIT, 60)                                   # the console's action timeout
+        self.assertLess(manage.apply_timeout(manage.BUILD_TIMEOUT) + manage.TIMEOUT, 900)   # its settings timeout
+        manage.LOCK_WAIT = 0.3
+        config = manage.load_config(self.config)
+        request = json.dumps({"base": self.answer("settings", "scout")["base"], "set": {"size": 1.3}})
+        with manage.taking_turns(config):
+            began = time.monotonic()
+            with self.assertRaisesRegex(manage.Failed, "another action is still running"):
+                manage.act(config, "restart", "juno")
+            self.assertLess(time.monotonic() - began, 5)
+            with self.assertRaisesRegex(manage.Failed, "another action is still running"):
+                manage.apply(config, "scout", request, False)
+            self.assertEqual(len(manage.apply(config, "scout", request, True)["diff"]), 1)   # a dry run only reads
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+        self.assertEqual(self.log("calls.txt"), [])
 
     def test_an_entry_without_its_id_first_is_refused(self):
         (self.dir / "bots.json").write_text(SETTINGS_ROSTER.replace('{"id": "tank", "name": "Tank"',
