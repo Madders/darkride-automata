@@ -174,7 +174,8 @@ On the bots' host it's laid out like this (the paths in `examples/manager.json` 
 python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json status --json
 python3 /opt/automata/tools/manage.py --config /opt/automata/manager.json restart|stop|start <id>
 ```
-The commands are only those: `status [--json]` and `restart`, `stop` or `start <id>`, where an id is lower-case
+The commands are only those: `status [--json]`, `restart`, `stop` or `start <id>`, `settings <id>` and `apply <id>
+[--dry-run]` (below), where an id is lower-case
 letters, digits, `_` and `-`, starting with a letter or digit. Anything else is refused before docker or ssh is
 touched. (`resident.sh` itself takes only lower-case letters and digits in an id, so keep the ids to those.)
 
@@ -186,10 +187,47 @@ from="<the dashboard's address>",restrict,command="python3 /opt/automata/tools/m
 `restrict` (OpenSSH 7.2+) turns off forwarding, the pty and anything added later. The command runs as the user whose
 `authorized_keys` it is, which must be able to write the accounts file and run docker and `resident.sh start`: on
 the bots' host, root's.
-With `--ssh` it takes the command from `SSH_ORIGINAL_COMMAND` and allows only `status --json` and `restart`, `stop`
-or `start <id>`. The dashboard's own config is `{"backend": "ssh", "ssh": {"host": "...", "user": "...", "key":
+With `--ssh` it takes the command from `SSH_ORIGINAL_COMMAND` and allows only `status --json`, `restart`, `stop`
+or `start <id>`, `settings <id>` and `apply <id> [--dry-run]` (below; apply's request comes over ssh's stdin). The dashboard's own config is `{"backend": "ssh", "ssh": {"host": "...", "user": "...", "key":
 "dashboard-key"}}`, and the same command lines then run there. `python tests/manage-test.py` checks the manager with a
 stand-in docker and ssh.
+
+### Changing a bot's settings
+
+A dashboard can also change a few of a bot's settings in the roster (bots.json), rebuild that bot and send it to the
+asset server:
+
+```
+python tools/manage.py --config manager.json settings <id>
+python tools/manage.py --config manager.json apply <id> [--dry-run]  < {"base": "...", "set": {"size": 1.2, "home": null}}
+```
+
+- The settings are only these: `size` (0.25-4), `shell`, `accent` and `paint2` (colours), `glow`, `metal`, `wear` and
+  `obedience` (0-1), `rockets` (true/false), `home` (one of the roster's areas), and in its `style`: `style.head`,
+  `style.eyes`, `style.antennas`, `style.jaw`, `style.fins`, `style.crest` and `style.chest`. Everything else in a
+  bot's entry (its name, role, voice, lines, post...) stays as it is, and `settings` doesn't send it out.
+- `settings <id>` answers `{"ok", "message", "name", "settings": {...}, "areas": [...], "base"}`: each setting as the
+  roster has it (null when it's left to the default), the roster's area names, and `base`, a fingerprint of the
+  bot's whole entry.
+- `apply <id>` reads `{"base", "set": {...}}` on stdin: the settings to change, null to take one away (back to its
+  default; `shell` and `accent` can't be). It's refused if the entry no longer matches `base` (someone changed it
+  since), or if any value isn't one the setting takes, and it answers `{"ok", "message", "diff": [{"setting", "from",
+  "to"}], "base"}`. With `--dry-run` that's all. Without it, it changes the bot's own entry in the roster (only its
+  characters: the rest of the file stays as laid out), runs the config's `build` and then `push` with the bot's id,
+  and restarts the bot if it's running. If the build or the push fails, the roster is put back and built (and
+  pushed) again, so the files on both sides match it; the message says if that failed too.
+- The config needs a `build` command for apply (without one, only `--dry-run` works), and a `push` unless the build
+  writes straight into the folder the asset server serves. For example, on the bots' host:
+
+  ```json
+  "build": ["/opt/automata/venv/bin/python", "tools/build_bots.py", "--roster", "residents/bots.json", "--out", "site/Duck", "{id}"],
+  "push": ["sh", "residents/push-bot.sh", "{id}"],
+  "build_timeout": 600
+  ```
+
+  `build_bots.py` needs numpy, scipy and trimesh (a venv). It writes the bot's model, textures and loader and the
+  roster's copy, `bots.json`, which the brain reads; the push sends those. Both run in the config's folder, under
+  `build_timeout` seconds each (default 600), while the manager's lock is held.
 
 ## What they cost
 

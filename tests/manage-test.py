@@ -121,7 +121,7 @@ def load_manage():
     return module
 
 
-class Manage(unittest.TestCase):
+class Host(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         d = self.dir = pathlib.Path(self.tmp.name)
@@ -141,9 +141,9 @@ class Manage(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def manage(self, *args, config=None):
+    def manage(self, *args, config=None, stdin=None):
         run = subprocess.run([sys.executable, str(MANAGE), "--config", str(config or self.config)] + list(args),
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, input=stdin or "")
         self.assertNotIn(KEY, run.stdout + run.stderr)
         self.assertNotIn("tvk_s3", run.stdout + run.stderr)
         return run
@@ -172,6 +172,8 @@ class Manage(unittest.TestCase):
             state.setdefault(name, {}).update(change)
         (self.dir / "containers.json").write_text(json.dumps(state))
 
+
+class Manage(Host):
     def test_status(self):
         bots = self.bots()
         self.assertEqual(list(bots), ["scout", "bolt", "juno", "tank"])
@@ -381,6 +383,270 @@ class Manage(unittest.TestCase):
             self.assertEqual(run.returncode, 1, command)
             self.assertFalse(json.loads(run.stdout)["ok"])
         self.assertFalse((self.dir / "calls.txt").exists())
+
+
+# build_bots.py, as the build command: logs the call and writes the bot's loader with its roster entry in it, so the
+# test can see what the build saw; "build-fails" (a count) beside it makes that many calls fail
+FAKE_BUILD = r"""
+import json, pathlib, sys
+here = pathlib.Path(__file__).parent
+with open(here / "build.txt", "a") as f:
+    f.write(sys.argv[1] + "\n")
+fails = here / "build-fails"
+if fails.exists():
+    n = int(fails.read_text())
+    if n > 1:
+        fails.write_text(str(n - 1))
+    else:
+        fails.unlink()
+    sys.exit("Traceback ... MemoryError: building " + sys.argv[1])
+bot = next(b for b in json.loads((here / "bots.json").read_text())["bots"] if b["id"] == sys.argv[1])
+(here / "out").mkdir(exist_ok=True)
+(here / "out" / ("bot-" + sys.argv[1] + ".js")).write_text(json.dumps(bot))
+print("built " + sys.argv[1])
+"""
+
+# the push: logs the call and the loader it sends; "push-fails" as above
+FAKE_PUSH = FAKE_BUILD.split("bot = next")[0].replace("build", "push") + r"""
+with open(here / "pushed.txt", "a") as f:
+    f.write((here / "out" / ("bot-" + sys.argv[1] + ".js")).read_text() + "\n")
+"""
+
+SETTINGS_ROSTER = """{
+  "about": "test",
+  "areas": {
+    "office": {"x": [-24.5, -5.0], "y": [2.5, 6.5], "z": [-44.5, -31.5]},
+    "ground": {"x": [-40, 40], "y": [-3.0, -1.5], "z": [-60, 20]}
+  },
+  "bots": [
+    {"id": "scout", "name": "Scout", "role": "guide", "size": 1.0, "shell": [0.9, 0.9, 0.9], "accent": [0.1, 0.5, 1.0], "voice": {"s_hi": "Hello there, Martin"}, "style": {"head": "loaf", "eyes": "lens"}},
+    {"id": "bolt", "off": true, "name": "Bolt", "size": 1.0, "shell": [0.86, 0.88, 0.92], "accent": [0.0, 0.85, 1.0]},
+    {"id": "juno", "name": "Juno", "size": 0.85, "shell": [0.09, 0.09, 0.11], "accent": [1.0, 0.1, 0.75], "home": "office",
+     "style": {"crest": true}},
+    {"id": "tank", "name": "Tank", "size": 1.4, "shell": [0.14, 0.15, 0.13], "accent": [0.2, 1.0, 0.35]}]
+}
+"""
+
+
+class Settings(Host):
+    def setUp(self):
+        super().setUp()
+        d = self.dir
+        (d / "bots.json").write_text(SETTINGS_ROSTER)
+        (d / "build.py").write_text(FAKE_BUILD)
+        (d / "push.py").write_text(FAKE_PUSH)
+        config = json.loads(self.config.read_text())
+        config["build"] = [sys.executable, "build.py", "{id}"]           # relative: run in the config's folder
+        config["push"] = [sys.executable, "push.py", "{id}"]
+        self.config.write_text(json.dumps(config))
+
+    def answer(self, *args, stdin=None, ok=True, config=None):
+        run = self.manage(*args, stdin=stdin, config=config)
+        lines = run.stdout.strip().splitlines()
+        self.assertEqual(len(lines), 1, run.stdout + run.stderr)
+        result = json.loads(lines[0])
+        self.assertEqual(result["ok"], ok, result["message"])
+        self.assertEqual(run.returncode, 0 if ok else 1)
+        return result
+
+    def apply(self, bot_id, changes, *flags, base=None, ok=True, config=None):
+        base = base or self.answer("settings", bot_id, config=config)["base"]
+        return self.answer("apply", bot_id, *flags, stdin=json.dumps({"base": base, "set": changes}), ok=ok,
+                           config=config)
+
+    def log(self, name):
+        path = self.dir / name
+        return path.read_text().splitlines() if path.exists() else []
+
+    def roster(self):
+        return (self.dir / "bots.json").read_text()
+
+    def test_settings(self):
+        s = self.answer("settings", "scout")
+        self.assertEqual(s["name"], "Scout")
+        self.assertEqual(s["areas"], ["office", "ground"])
+        self.assertEqual(s["settings"]["size"], 1.0)
+        self.assertEqual(s["settings"]["style.head"], "loaf")
+        self.assertIsNone(s["settings"]["home"])
+        self.assertEqual(set(s["settings"]), set(load_manage().SETTINGS))
+        self.assertNotIn("Hello there", json.dumps(s))                  # the rest of its entry isn't sent
+        self.assertRegex(s["base"], "^[0-9a-f]{16}$")
+        self.assertIn("isn't in bots.json", self.answer("settings", "woody", ok=False)["message"])
+        self.assertIn("lower-case", self.answer("settings", "Scout", ok=False)["message"])
+
+    def test_dry_run_changes_nothing(self):
+        r = self.apply("scout", {"size": 1.2, "style.head": "dome"}, "--dry-run")
+        self.assertEqual(r["diff"], [{"setting": "size", "from": 1.0, "to": 1.2},
+                                     {"setting": "style.head", "from": "loaf", "to": "dome"}])
+        self.assertEqual(r["message"], 'scout: would change size 1.0 -> 1.2, style.head "loaf" -> "dome"')
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+        self.assertEqual(self.log("build.txt"), [])
+        self.assertEqual(self.log("calls.txt"), [])
+
+    def test_apply_changes_only_that_bot_builds_pushes_and_restarts(self):
+        r = self.apply("scout", {"size": 1.2, "style.head": "dome", "style.fins": True, "home": "office",
+                                 "rockets": True, "shell": [0.5, 0.25, 0.125]})
+        self.assertEqual(r["message"], 'scout: size 1.0 -> 1.2, shell [0.9, 0.9, 0.9] -> [0.5, 0.25, 0.125], '
+                                       'rockets (default) -> true, home (default) -> "office", style.head "loaf" -> '
+                                       '"dome", style.fins (default) -> true; built, pushed, restarted')
+        self.assertEqual(len(r["diff"]), 6)
+        new = '    {"id": "scout", "name": "Scout", "role": "guide", "size": 1.2, "shell": [0.5, 0.25, 0.125], ' \
+              '"accent": [0.1, 0.5, 1.0], "voice": {"s_hi": "Hello there, Martin"}, "style": {"head": "dome", ' \
+              '"eyes": "lens", "fins": true}, "home": "office", "rockets": true},'
+        old = SETTINGS_ROSTER.splitlines()
+        self.assertEqual(self.roster().splitlines(),
+                         [new if line.startswith('    {"id": "scout"') else line for line in old])
+        self.assertEqual(self.log("build.txt"), ["scout"])
+        self.assertEqual(self.log("push.txt"), ["scout"])
+        self.assertEqual(json.loads(self.log("pushed.txt")[0])["size"], 1.2)      # pushed what was built from the new
+        self.assertIn("restart resident-scout", self.log("calls.txt"))
+        self.assertEqual(r["base"], self.answer("settings", "scout")["base"])       # the next apply can follow on
+        self.assertEqual(sorted(f.name for f in self.dir.glob(".*")), [".manager.lock"])
+
+    def test_a_multi_line_entry_is_changed_in_place(self):
+        r = self.apply("juno", {"home": None, "style.crest": None, "obedience": 0.4})
+        self.assertEqual(r["diff"], [{"setting": "obedience", "from": None, "to": 0.4},
+                                     {"setting": "home", "from": "office", "to": None},
+                                     {"setting": "style.crest", "from": True, "to": None}])
+        juno = next(b for b in json.loads(self.roster())["bots"] if b["id"] == "juno")
+        self.assertEqual(juno, {"id": "juno", "name": "Juno", "size": 0.85, "shell": [0.09, 0.09, 0.11],
+                                "accent": [1.0, 0.1, 0.75], "style": {}, "obedience": 0.4})
+        self.assertIn('    {"id": "tank"', self.roster())
+
+    def test_a_stale_base_is_refused(self):
+        base = self.answer("settings", "scout")["base"]
+        self.apply("scout", {"size": 1.1})
+        r = self.apply("scout", {"size": 0.9}, base=base, ok=False)
+        self.assertIn("changed since its settings were read", r["message"])
+        self.assertIn('"size": 1.1', self.roster())
+        self.assertEqual(self.log("build.txt"), ["scout"])
+
+    def test_bad_values_are_refused_and_change_nothing(self):
+        cases = [
+            ({"size": 9}, "size is a number from 0.25 to 4"), ({"size": "1"}, "size is a number"),
+            ({"size": True}, "size is a number"), ({"wear": -0.1}, "wear is a number from 0 to 1"),
+            ({"shell": [1, 2, 3]}, "shell is a colour"), ({"shell": [0.5, 0.5]}, "shell is a colour"),
+            ({"shell": None}, "shell can be changed but not taken away"),
+            ({"home": "attic"}, "home is one of the roster's areas (office, ground)"),
+            ({"style.antennas": True}, "style.antennas is one of 0, 1, 2"),
+            ({"style.antennas": 3}, "style.antennas is one of 0, 1, 2"),
+            ({"style.head": "cube"}, "style.head is one of loaf, dome, wedge"),
+            ({"rockets": "yes"}, "rockets is true or false"),
+            ({"name": "Evil", "voice": {}}, "not a setting that can be changed here: name, voice"),
+            ({"off": False}, "not a setting that can be changed here: off"),
+        ]
+        for changes, says in cases:
+            self.assertIn(says, self.apply("scout", changes, ok=False)["message"], changes)
+        for stdin in ("", "not json", "[]", '{"set": {}}', '{"base": "x"}', '{"base": "x", "set": []}'):
+            self.assertIn("apply reads", self.answer("apply", "scout", stdin=stdin, ok=False)["message"], stdin)
+        base = self.answer("settings", "scout")["base"]
+        nan = '{"base": "%s", "set": {"size": NaN}}' % base
+        self.assertIn("size is a number", self.answer("apply", "scout", stdin=nan, ok=False)["message"])
+        self.assertIn("longer than", self.answer("apply", "scout", stdin="x" * 70000, ok=False)["message"])
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+        self.assertEqual(self.log("build.txt"), [])
+
+    def test_nothing_to_change(self):
+        r = self.apply("scout", {"size": 1, "style.head": "loaf"})
+        self.assertEqual((r["message"], r["diff"]), ("scout: nothing to change", []))
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+        self.assertEqual(self.log("build.txt"), [])
+
+    def test_a_failed_build_puts_the_roster_back_and_builds_again(self):
+        (self.dir / "build-fails").write_text("1")
+        r = self.apply("scout", {"size": 1.3}, ok=False)
+        self.assertEqual(r["message"], "scout: the build failed: Traceback ... MemoryError: building scout; the roster "
+                                       "is back as it was, built again as it was")
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+        self.assertEqual(self.log("build.txt"), ["scout", "scout"])
+        self.assertEqual(json.loads((self.dir / "out" / "bot-scout.js").read_text())["size"], 1.0)
+        self.assertEqual(self.log("push.txt"), [])
+        self.assertNotIn("restart resident-scout", self.log("calls.txt"))
+
+    def test_a_failed_push_puts_everything_back(self):
+        (self.dir / "push-fails").write_text("1")
+        r = self.apply("scout", {"size": 1.3}, ok=False)
+        self.assertEqual(r["message"], "scout: the push failed: Traceback ... MemoryError: pushing scout; the roster is "
+                                       "back as it was, built again as it was, pushed again as it was")
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+        self.assertEqual(json.loads(self.log("pushed.txt")[-1])["size"], 1.0)
+
+    def test_when_putting_it_back_fails_too_it_says_so(self):
+        (self.dir / "push-fails").write_text("2")
+        r = self.apply("scout", {"size": 1.3}, ok=False)
+        self.assertIn("built again as it was, the push failed: Traceback ... MemoryError: pushing scout too, so its "
+                      "files may not match the roster: run the push by hand", r["message"])
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+
+    def test_without_a_build_command_only_dry_runs(self):
+        config = json.loads(self.config.read_text())
+        del config["build"]
+        self.config.write_text(json.dumps(config))
+        self.assertEqual(len(self.apply("scout", {"size": 1.3}, "--dry-run")["diff"]), 1)
+        self.assertIn("no build command", self.apply("scout", {"size": 1.3}, ok=False)["message"])
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
+
+    def test_without_a_push_command_builds_only(self):
+        config = json.loads(self.config.read_text())
+        del config["push"]
+        self.config.write_text(json.dumps(config))
+        self.assertEqual(self.apply("scout", {"size": 1.3})["message"], "scout: size 1.0 -> 1.3; built, restarted")
+        self.assertEqual(self.log("push.txt"), [])
+
+    def test_bots_that_arent_running_arent_restarted(self):
+        self.assertIn("; built, pushed; it's off, so it shows when it's brought back",
+                      self.apply("bolt", {"size": 1.1})["message"])
+        self.assertIn("; built, pushed; it isn't running, so it shows when it next starts",
+                      self.apply("tank", {"size": 1.1})["message"])
+        self.assertFalse([c for c in self.log("calls.txt") if c.startswith("restart")])
+
+    def test_a_failed_restart_says_the_change_is_in(self):
+        self.containers(**{"resident-scout": {"stuck": True}})
+        r = self.apply("scout", {"size": 1.3}, ok=False)
+        self.assertIn("scout: size 1.0 -> 1.3; built, pushed, but couldn't restart it", r["message"])
+        self.assertIn('"size": 1.3', self.roster())
+
+    def test_an_entry_without_its_id_first_is_refused(self):
+        (self.dir / "bots.json").write_text(SETTINGS_ROSTER.replace('{"id": "tank", "name": "Tank"',
+                                                                    '{"name": "Tank", "id": "tank"'))
+        self.assertIn("isn't laid out as expected", self.answer("settings", "tank", ok=False)["message"])
+
+    def test_badly_typed_build_configs(self):
+        good = json.loads(self.config.read_text())
+        bad = self.dir / "bad.json"
+        for config, says in [({**good, "build": "python build.py"}, "build isn't a list of strings"),
+                             ({**good, "push": [sys.executable, "push.py", "{username}"]}, "push can fill in only {id}"),
+                             ({**good, "build_timeout": "60"}, "build_timeout isn't a whole number"),
+                             ({**good, "build_timeout": 0}, "build_timeout isn't a whole number")]:
+            bad.write_text(json.dumps(config))
+            self.assertIn(says, self.answer("settings", "scout", config=bad, ok=False)["message"])
+        self.assertEqual(self.log("build.txt"), [])
+
+    def test_usage(self):
+        self.assertIn("usage: settings <id>", self.answer("settings", ok=False)["message"])
+        self.assertIn("usage: apply <id> [--dry-run]", self.answer("apply", "scout", "extra", ok=False)["message"])
+        self.assertIn("usage: status", self.answer("status", "--json", "--dry-run", ok=False)["message"])
+
+    def test_over_ssh(self):
+        client = self.dir / "client.json"
+        client.write_text(json.dumps({"backend": "ssh", "ssh": {
+            "host": "bots.lan", "command": [sys.executable, str(self.dir / "ssh.py"), str(MANAGE), str(self.config)]}}))
+        self.assertEqual(self.answer("settings", "scout", config=client)["settings"]["size"], 1.0)
+        self.assertEqual(len(self.apply("scout", {"size": 1.3}, "--dry-run", config=client)["diff"]), 1)
+        self.assertIn("built, pushed, restarted", self.apply("scout", {"size": 1.3}, config=client)["message"])
+        self.assertIn('"size": 1.3', self.roster())
+
+    def test_ssh_allows_settings_and_apply_only_as_given(self):
+        allowed = {"settings scout": True, "apply scout --dry-run": True, "settings": False, "apply": False,
+                   "apply scout --force": False, "apply scout --dry-run x": False, "settings scout juno": False,
+                   "apply --dry-run scout": False}
+        for command, ok in allowed.items():
+            run = subprocess.run([sys.executable, str(MANAGE), "--config", str(self.config), "--ssh"],
+                                 capture_output=True, text=True, input="{}",
+                                 env={**os.environ, "SSH_ORIGINAL_COMMAND": command})
+            message = json.loads(run.stdout)["message"]
+            self.assertEqual("over ssh, only" not in message, ok, (command, message))
+        self.assertEqual(self.roster(), SETTINGS_ROSTER)
 
 
 if __name__ == "__main__":
