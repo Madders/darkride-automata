@@ -7,7 +7,9 @@
 //  the viewer gets is logged with its Hips and neck_pitch rotations. A hop counts when the bot reaches the other floor
 //  and was seen at the top of a flight's arc, over a metre above where it stands on the upper floor (a flight peaks
 //  about 0.9 m above it; a walked hop climbs straight up to it, a floor in 0.1 s, so it's never seen above it). A jump
-//  of more than JUMP m between two frames is reported as a TELEPORT. The last line says PASS or FAIL.
+//  of more than JUMP m between two frames is reported as a TELEPORT; a frame that goes back to a height already seen in
+//  that hop is an old one the viewer shows again while it saves pictures, and is left out. The last line says PASS or FAIL.
+//  Each hop also says whether its rocket flame (the bot-rocket-arty particle entity) was seen; that's not part of PASS.
 //  Each hop is only sent once the bot stands still within NEAR of that end of the hop (so its route starts with the
 //  hop, not a walk to it), and the line "route starts at" says where it was. It's sent to the foot up to three times
 //  (and back to the top twice if it has moved off after the hop up); if it never stands there, or leaves the domain,
@@ -78,12 +80,30 @@
         MyAvatar.position = Vec3.sum(eye, Vec3.multiply(1.5, side));     // close by (the mixer favours what's near)
     }
     var lastY = null, start = 0, teleports = 0, hops = 0, peak = null, following = false;
+    // the heights it's been seen at in this hop: while the viewer saves pictures it now and then shows an old one again
+    // for up to a second (seen on 1.1.3.1 and 1.1.4, never without the pictures), so a frame back at one of those, far
+    // from the last, is left out, and jumps are measured from the last new one. A walked hop jumps to a height not seen.
+    var seen = null, stale = false, olds = 0;
     Script.update.connect(function () {
         var b = following && find();
         if (!b) return;
         aim(b);
         var y = b.position.y;
-        if (lastY !== null && Math.abs(y - lastY) > JUMP) { teleports++; log("TELEPORT " + lastY.toFixed(2) + " -> " + y.toFixed(2)); }
+        if (seen && lastY !== null && Math.abs(y - lastY) > 0.5 &&
+            seen.some(function (s) { return Math.abs(s - y) < 0.02; })) {
+            if (!stale) { olds++; log((Date.now() - start) + " ms  y " + y.toFixed(2) + " again (an old height), left out"); }
+            stale = true;
+            return;
+        }
+        // the frames hidden by old heights are missing, so a jump straight after them isn't counted (a walked hop is
+        // still caught: it's never seen at the top of a flight's arc)
+        var after = stale;
+        stale = false;
+        if (seen) seen.push(y);
+        if (lastY !== null && Math.abs(y - lastY) > JUMP) {
+            if (after) log("gap " + lastY.toFixed(2) + " -> " + y.toFixed(2) + " after old heights, not counted");
+            else { teleports++; log("TELEPORT " + lastY.toFixed(2) + " -> " + y.toFixed(2)); }
+        }
         if (peak !== null && y > peak) peak = y;
         if (start && (lastY === null || Math.abs(y - lastY) > 0.005))
             log((Date.now() - start) + " ms  y " + y.toFixed(2) + "  " + joints(b));
@@ -126,9 +146,14 @@
             " m from the hop's end");
         Messages.sendMessage("darkride.bots.cmd", JSON.stringify({ bot: ID, goto: goal }));
         log(name + ": sent to " + JSON.stringify(goal));
-        start = Date.now(); peak = y0;
+        start = Date.now(); peak = y0; seen = [y0];
+        var flames = 0;
         var n = 0, timer = Script.setInterval(function () {
             Window.takeSnapshot(false, false, 0, name + "-" + (n < 10 ? "0" : "") + n);
+            // the rockets' flame is an entity of the domain's, which pictures don't show (particles), so look it up
+            var c = find();
+            if (c && Entities.findEntitiesByName("bot-rocket-" + ID, c.position, 10).length) flames++;
+            if (n === SHOTS - 1) log(name + ": rocket flame " + (flames ? "seen in " + flames + " of " + SHOTS + " frames" : "not seen"));
             if (++n < SHOTS) return;
             Script.clearInterval(timer);
             waitFor(function (a) { return Math.abs(a.position.y - y0) > 4; }, LAND, function (a) {
@@ -162,7 +187,7 @@
             hop("up", DOWN, UP, function () {
                 function down() {
                     hop("down", UP, DOWN, function () {
-                        log(hops + " of 2 hops, " + teleports + " teleports");
+                        log(hops + " of 2 hops, " + teleports + " teleports (" + olds + " old heights left out)");
                         log(hops === 2 && !teleports ? "PASS" : "FAIL");
                         Script.stop();
                     });
